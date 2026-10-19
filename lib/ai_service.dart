@@ -5,35 +5,116 @@ import 'package:http/http.dart' as http;
 import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
 import 'math_engine.dart';
+import 'gemini_models.dart';
 import 'store.dart';
 
 class AiService {
   AiService(this.store);
   final AppStore store;
 
-  Future<String> _gemini(String prompt, {Uint8List? image, String mime = 'image/jpeg'}) async {
-    if (store.geminiKey.isEmpty) throw StateError('Добавьте ключ Gemini в настройках.');
+
+  /// Returns only Flash models that explicitly support generateContent.
+  /// The list comes from the user's own API key, not a hard-coded catalog.
+  Future<List<String>> listGeminiModels({String? apiKey}) async {
+    final key = (apiKey ?? store.geminiKey).trim();
+    if (key.isEmpty) throw StateError('Сначала укажите ключ Gemini.');
+    final choices = <String>{};
+    String? nextPage;
+    for (var page = 0; page < 5; page++) {
+      final uri = Uri.https('generativelanguage.googleapis.com', '/v1beta/models', {
+        'pageSize': '100',
+        if (nextPage != null) 'pageToken': nextPage,
+      });
+      final response = await http.get(
+        uri, headers: {'x-goog-api-key': key},
+      ).timeout(const Duration(seconds: 25));
+      if (response.statusCode != 200) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw StateError('Ключ Gemini отклонён. Проверьте его в Google AI Studio.');
+        }
+        throw StateError('Не удалось получить модели Gemini: HTTP '
+            '${response.statusCode}. ${_safeError(response.body)}');
+      }
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      choices.addAll(GeminiModels.availableFromResponse(body));
+      final token = (body['nextPageToken'] ?? '').toString();
+      if (token.isEmpty) break;
+      nextPage = token;
+    }
+    final result = choices.toList()..sort(GeminiModels.compare);
+    return result;
+  }
+
+  Future<http.Response> _geminiRequest(
+    String model, String prompt, Uint8List? image, String mime,
+  ) {
     final parts = <Map<String, dynamic>>[{'text': prompt}];
     if (image != null) {
       parts.add({'inline_data': {'mime_type': mime, 'data': base64Encode(image)}});
     }
     final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/'
-      '${Uri.encodeComponent(store.geminiModel)}:generateContent');
-    final response = await http.post(url, headers: {
+      '${Uri.encodeComponent(model)}:generateContent');
+    return http.post(url, headers: {
       'Content-Type': 'application/json', 'x-goog-api-key': store.geminiKey,
-    }, body: jsonEncode({'contents': [{'parts': parts}],
-      'generationConfig': {'temperature': 0.1}})).timeout(const Duration(seconds: 65));
-    if (response.statusCode != 200) {
-      throw StateError('Gemini: HTTP ${response.statusCode}. ${_safeError(response.body)}');
-    }
+    }, body: jsonEncode({'contents': [{'parts': parts}]}))
+      .timeout(const Duration(seconds: 90));
+  }
+
+  static String _geminiText(http.Response response) {
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final candidates = decoded['candidates'] as List? ?? [];
     if (candidates.isEmpty) throw StateError('Gemini не смог прочитать задание.');
     final content = (candidates.first as Map)['content'] as Map?;
     final textParts = content?['parts'] as List? ?? [];
-    final text = textParts.whereType<Map>().map((p) => (p['text'] ?? '').toString()).join('\n');
-    if (text.trim().isEmpty) throw StateError('Gemini вернул пустой результат.');
+    final text = textParts.whereType<Map>().map((part) =>
+        (part['text'] ?? '').toString()).join('\n');
+    if (text.trim().isEmpty) {
+      throw StateError('Gemini вернул пустой результат. Попробуйте ещё раз.');
+    }
     return text;
+  }
+
+  Future<String> _gemini(String prompt, {
+    Uint8List? image, String mime = 'image/jpeg',
+  }) async {
+    if (store.geminiKey.isEmpty) throw StateError('Добавьте ключ Gemini в настройках.');
+    final requested = GeminiModels.normalize(store.geminiModel);
+    var response = await _geminiRequest(requested, prompt, image, mime);
+    if (response.statusCode == 404) {
+      // A retired model may remain persisted in an older installation.
+      // Look up compatible models and retry once, avoiding premium/pro models.
+      try {
+        final models = await listGeminiModels();
+        final alternative = models.where((m) => m != requested).firstOrNull;
+        if (alternative != null) {
+          final retried = await _geminiRequest(alternative, prompt, image, mime);
+          if (retried.statusCode == 200) {
+            store.geminiModel = alternative;
+            await store.save();
+            return _geminiText(retried);
+          }
+          response = retried;
+        }
+      } catch (_) {
+        // Original 404 message below gives the user a recoverable action.
+      }
+      if (response.statusCode == 404) {
+        throw StateError('Модель Gemini «$requested» недоступна. '
+          'Откройте Настройки → Gemini → «Получить доступные модели» '
+          'и выберите подходящую модель.');
+      }
+    }
+    if (response.statusCode == 429) {
+      throw StateError('Исчерпан лимит запросов Gemini. '
+        'Попробуйте позже или проверьте квоту API.');
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw StateError('Доступ Gemini отклонён. Проверьте ключ и разрешения модели.');
+    }
+    if (response.statusCode != 200) {
+      throw StateError('Gemini: HTTP ${response.statusCode}. ${_safeError(response.body)}');
+    }
+    return _geminiText(response);
   }
 
   Future<String> _grok(String prompt) async {

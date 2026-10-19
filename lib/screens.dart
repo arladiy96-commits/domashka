@@ -859,6 +859,28 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController gemini, grok, gm, xm;
   late bool verify;
   bool saving = false;
+  bool loadingGeminiModels = false;
+  List<String> availableModels = const [];
+
+  Future<void> loadGeminiModels() async {
+    if (gemini.text.trim().isEmpty) {
+      message(context, 'Сначала введите ключ Gemini.');
+      return;
+    }
+    setState(() => loadingGeminiModels = true);
+    try {
+      final options = await AiService(widget.store)
+        .listGeminiModels(apiKey: gemini.text.trim());
+      if (!mounted) return;
+      setState(() => availableModels = options);
+      if (options.isEmpty) message(context, 'Для этого ключа нет доступных Flash-моделей.');
+    } catch (error) {
+      if (mounted) message(context, '$error');
+    } finally {
+      if (mounted) setState(() => loadingGeminiModels = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -893,6 +915,20 @@ class _SettingsPageState extends State<SettingsPage> {
         autocorrect: false, decoration: const InputDecoration(labelText: 'Gemini API key')),
       const SizedBox(height: 10), TextField(controller: gm,
         decoration: const InputDecoration(labelText: 'Модель Gemini')),
+      const SizedBox(height: 8), Align(alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          onPressed: loadingGeminiModels ? null : loadGeminiModels,
+          icon: Icon(loadingGeminiModels ? Icons.hourglass_top_rounded : Icons.refresh_rounded),
+          label: Text(loadingGeminiModels ? 'Проверяем модели…' : 'Получить доступные модели'))),
+      if (availableModels.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        const Text('Нажмите на модель, чтобы выбрать её:',
+          style: TextStyle(color: muted, fontSize: 12)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 7, runSpacing: 5, children: availableModels.take(8).map((model) =>
+          ChoiceChip(label: Text(model), selected: gm.text.trim() == model,
+            onSelected: (_) => setState(() => gm.text = model))).toList()),
+      ],
     ])),
     const SizedBox(height: 14),
     Surface(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

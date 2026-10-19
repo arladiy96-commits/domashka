@@ -6,13 +6,14 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
+import 'gemini_models.dart';
 
 class AppStore extends ChangeNotifier {
   final _secure = const FlutterSecureStorage();
   final books = <BookRecord>[];
   final history = <StudyResult>[];
   String geminiKey = '', grokKey = '';
-  String geminiModel = 'gemini-2.5-flash', grokModel = 'grok-4.3';
+  String geminiModel = GeminiModels.defaultModel, grokModel = 'grok-4.3';
   bool checkWithGemini = true, busy = false;
   String activity = '';
   double importProgress = 0;
@@ -20,6 +21,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> init() async {
     _root = await getApplicationDocumentsDirectory();
+    var migratedModel = false;
     final file = File('${_root!.path}/domashka.json');
     if (await file.exists()) {
       try {
@@ -29,7 +31,11 @@ class AppStore extends ChangeNotifier {
         books.removeWhere((b) => !File(b.path).existsSync());
         history.addAll(((data['history'] as List?) ?? []).whereType<Map>()
             .map((v) => StudyResult.fromJson(Map<String, dynamic>.from(v))));
-        geminiModel = (data['geminiModel'] ?? geminiModel).toString();
+        geminiModel = GeminiModels.normalize((data['geminiModel'] ?? geminiModel).toString());
+        if (geminiModel == 'gemini-2.5-flash' || geminiModel.isEmpty) {
+          geminiModel = GeminiModels.defaultModel;
+          migratedModel = true;
+        }
         grokModel = (data['grokModel'] ?? grokModel).toString();
         checkWithGemini = data['checkWithGemini'] != false;
       } catch (e) { debugPrint('Database load: $e'); }
@@ -38,6 +44,7 @@ class AppStore extends ChangeNotifier {
       geminiKey = await _secure.read(key: 'gemini_key') ?? '';
       grokKey = await _secure.read(key: 'grok_key') ?? '';
     } catch (e) { debugPrint('Secure storage: $e'); }
+    if (migratedModel) await save();
     notifyListeners();
   }
 
@@ -59,7 +66,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> updateSettings(String gemini, String grok, String gm, String xm, bool verify) async {
     geminiKey = gemini.trim(); grokKey = grok.trim();
-    geminiModel = gm.trim(); grokModel = xm.trim(); checkWithGemini = verify;
+    geminiModel = GeminiModels.normalize(gm.isEmpty ? GeminiModels.defaultModel : gm); grokModel = xm.trim(); checkWithGemini = verify;
     await _secure.write(key: 'gemini_key', value: geminiKey);
     await _secure.write(key: 'grok_key', value: grokKey);
     await save();
