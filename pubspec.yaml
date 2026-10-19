@@ -1,0 +1,30 @@
+name: domashka
+description: Семейный помощник по домашним заданиям
+publish_to: none
+version: 0.1.0+1
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.5.0
+  pdfrx: ^2.4.8
+  file_picker: ^11.0.3
+  image_picker: ^1.2.1
+  path_provider: ^2.1.5
+  flutter_secure_storage: ^10.0.0
+  flutter_launcher_icons: ^0.14.4
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/images/app_icon.png
+  adaptive_icon_background: '#eaf3ff'
+  adaptive_icon_foreground: assets/images/app_icon.png
