@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -6,6 +7,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'ai_service.dart';
 import 'models.dart';
 import 'store.dart';
+import 'offline_catalog.dart';
 
 const ink = Color(0xff142b50);
 const accent = Color(0xff246af3);
@@ -273,6 +275,15 @@ class _LibraryPageState extends State<LibraryPage> {
         builder: (_) => BookReader(store: widget.store, book: book)));
     } catch (e) { if (mounted) message(context, 'Ошибка загрузки PDF: $e'); }
   }
+  Future<void> importOffline() async {
+    try {
+      final book = await widget.store.importOfflineBook();
+      if (book != null && mounted) Navigator.push(context, MaterialPageRoute(
+        builder: (_) => BookReader(store: widget.store, book: book)));
+    } catch (e) {
+      if (mounted) message(context, 'Ошибка импорта ZIP: $e');
+    }
+  }
   @override
   Widget build(BuildContext context) {
     final books = widget.store.books.where((e) =>
@@ -280,8 +291,14 @@ class _LibraryPageState extends State<LibraryPage> {
     return Stack(children: [ListView(padding: const EdgeInsets.fromLTRB(20, 20, 20, 30), children: [
       Row(children: [const Expanded(child: SectionHead('Мои учебники',
         subtitle: 'Настоящие страницы всегда под рукой')),
-        IconButton.filled(onPressed: widget.store.busy ? null : import,
-          icon: const Icon(Icons.add_rounded))]),
+        PopupMenuButton<String>(
+          enabled: !widget.store.busy, icon: const Icon(Icons.add_rounded),
+          tooltip: 'Добавить учебник',
+          onSelected: (option) => option == 'offline' ? importOffline() : import(),
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'offline', child: Text('Офлайн-каталог ZIP')),
+            PopupMenuItem(value: 'pdf', child: Text('Учебник PDF')),
+          ])]),
       const SizedBox(height: 19),
       TextField(onChanged: (v) => setState(() => search = v),
         decoration: const InputDecoration(prefixIcon: Icon(Icons.search),
@@ -292,10 +309,16 @@ class _LibraryPageState extends State<LibraryPage> {
           color: Color(0xff538df1), size: 65), const SizedBox(height: 14),
         const Text('Добавим первый учебник?', style: TextStyle(color: ink,
           fontWeight: FontWeight.w800, fontSize: 18)), const SizedBox(height: 8),
-        const Text('Выбери PDF. Домашка откроет страницы и построит указатель текста.',
+        const Text('Загрузи готовый офлайн-каталог ZIP для поиска без ИИ или обычный PDF.',
           textAlign: TextAlign.center, style: TextStyle(color: muted, height: 1.45)),
-        const SizedBox(height: 16), FilledButton.icon(onPressed: import,
-          icon: const Icon(Icons.upload_file), label: const Text('Загрузить PDF')),
+        const SizedBox(height: 16),
+        FilledButton.icon(onPressed: importOffline,
+          icon: const Icon(Icons.offline_pin_rounded),
+          label: const Text('Загрузить офлайн ZIP')),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(onPressed: import,
+          icon: const Icon(Icons.upload_file),
+          label: const Text('Загрузить обычный PDF')),
         const SizedBox(height: 14),
       ])) else GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2,
@@ -321,7 +344,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 ]))), const SizedBox(height: 10),
               Text(book.title, maxLines: 2, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w800, color: ink, fontSize: 13)),
-              const SizedBox(height: 4), Text('${book.pageCount} страниц · PDF',
+              const SizedBox(height: 4), Text('${book.pageCount} страниц · ${book.isOffline ? 'Офлайн' : 'PDF'}',
                 style: const TextStyle(color: muted, fontSize: 11)),
             ])));
         }),
