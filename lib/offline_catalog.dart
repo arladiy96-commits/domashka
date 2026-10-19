@@ -113,7 +113,7 @@ class OfflineCatalog {
         throw const FormatException('В архиве отсутствуют изображения страниц.');
       }
       if (await destination.exists()) {
-        throw const FileSystemException('Каталог уже существует.', '${destination.path}');
+        throw FileSystemException('Каталог уже существует.', destination.path);
       }
       await stage.rename(destination.path);
       onProgress?.call(1);
