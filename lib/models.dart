@@ -2,22 +2,27 @@ import 'dart:convert';
 
 class BookRecord {
   BookRecord({required this.id, required this.title, required this.path,
-    required this.pageCount, this.offset = 0, Map<String, String>? texts})
+    required this.pageCount, this.offset = 0, this.offlineDirectory, Map<String, String>? texts})
       : texts = texts ?? {};
   final String id;
   String title;
   final String path;
   final int pageCount;
+  final String? offlineDirectory;
+  bool get isOffline => offlineDirectory != null;
+  String pageImagePath(int page) => '${offlineDirectory!}/pages/${page.toString().padLeft(3, '0')}.jpg';
   int offset;
   final Map<String, String> texts;
   int pdfPage(int printedPage) => printedPage + offset;
   String textAt(int page) => texts[page.toString()] ?? '';
   Map<String, dynamic> toJson() => {'id': id, 'title': title, 'path': path,
-    'pageCount': pageCount, 'offset': offset, 'texts': texts};
+    'pageCount': pageCount, 'offset': offset, 'texts': texts,
+    'offlineDirectory': offlineDirectory};
   factory BookRecord.fromJson(Map<String, dynamic> data) => BookRecord(
     id: data['id'].toString(), title: data['title'].toString(),
     path: data['path'].toString(), pageCount: (data['pageCount'] as num).toInt(),
     offset: (data['offset'] as num?)?.toInt() ?? 0,
+    offlineDirectory: data['offlineDirectory']?.toString(),
     texts: (data['texts'] as Map? ?? {}).map(
       (key, value) => MapEntry(key.toString(), value.toString())));
 }
