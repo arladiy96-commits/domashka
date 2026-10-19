@@ -6,6 +6,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
 import 'math_engine.dart';
 import 'gemini_models.dart';
+import 'grok_models.dart';
 import 'store.dart';
 
 class AiService {
@@ -117,25 +118,100 @@ class AiService {
     return _geminiText(response);
   }
 
-  Future<String> _grok(String prompt) async {
-    if (store.grokKey.isEmpty) throw StateError('Добавьте ключ Grok в настройках.');
-    final response = await http.post(Uri.parse('https://api.x.ai/v1/chat/completions'),
+
+  /// Lists text models visible to this xAI API key; no inference call.
+  Future<List<String>> listGrokModels({String? apiKey}) async {
+    final key = (apiKey ?? store.grokKey).trim();
+    if (key.isEmpty) throw StateError('Введите API-ключ xAI.');
+    if (key.startsWith('gsk_')) {
+      throw StateError('Это ключ Groq Cloud, а не Grok от xAI. '
+        'Для Grok нужен ключ из console.x.ai.');
+    }
+    final response = await http.get(Uri.parse('https://api.x.ai/v1/models'),
+      headers: {'Authorization': 'Bearer $key'},
+    ).timeout(const Duration(seconds: 25));
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw StateError('xAI отклонил ключ. Проверьте его в console.x.ai.');
+    }
+    if (response.statusCode != 200) {
+      throw StateError('Не удалось получить модели xAI: HTTP '
+          '${response.statusCode}. ${_safeError(response.body)}');
+    }
+    return GrokModels.availableFromResponse(
+      jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<http.Response> _grokRequest(String model, String prompt) {
+    return http.post(Uri.parse('https://api.x.ai/v1/chat/completions'),
       headers: {'Authorization': 'Bearer ${store.grokKey}',
         'Content-Type': 'application/json'},
-      body: jsonEncode({'model': store.grokModel,
+      body: jsonEncode({
+        'model': model,
         'messages': [
-          {'role': 'system', 'content': 'Ты опытный учитель начальных классов русскоязычной школы Казахстана. '
-            'Строго придерживайся программы второго класса; не вводи сложные методы. '
-            'Точно вычисляй, не выдумывай отсутствующее условие, выдавай только JSON.'},
+          {'role': 'system', 'content': 'Ты опытный учитель начальных классов '
+            'русскоязычной школы Казахстана. Строго придерживайся программы '
+            'второго класса; не вводи сложные методы. Точно вычисляй, '
+            'не выдумывай отсутствующее условие, выдавай только JSON.'},
           {'role': 'user', 'content': prompt},
-        ]})).timeout(const Duration(seconds: 80));
-    if (response.statusCode != 200) {
-      throw StateError('Grok: HTTP ${response.statusCode}. ${_safeError(response.body)}');
-    }
+        ],
+      }),
+    ).timeout(const Duration(seconds: 80));
+  }
+
+  static String _grokText(http.Response response) {
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final choices = data['choices'] as List? ?? [];
     if (choices.isEmpty) throw StateError('Grok не предоставил ответ.');
-    return (((choices.first as Map)['message'] as Map?)?['content'] ?? '').toString();
+    final text = (((choices.first as Map)['message'] as Map?)?['content'] ?? '').toString();
+    if (text.trim().isEmpty) throw StateError('Grok вернул пустой ответ.');
+    return text;
+  }
+
+  Future<String> _grok(String prompt) async {
+    if (store.grokKey.isEmpty) throw StateError('Добавьте ключ xAI в настройках.');
+    if (store.grokKey.trim().startsWith('gsk_')) {
+      throw StateError('Ключ Groq Cloud (gsk_) не подходит для Grok от xAI. '
+          'Это два разных сервиса.');
+    }
+    final requested = GrokModels.normalize(store.grokModel);
+    var response = await _grokRequest(requested, prompt);
+    if (response.statusCode == 404) {
+      // Only retry with a documented, same-price-class model. Never
+      // silently upgrade to a more expensive Grok 4.7.
+      try {
+        final accessible = await listGrokModels();
+        final fallback = GrokModels.samePriceFallback(accessible, requested);
+        if (fallback != null) {
+          final retry = await _grokRequest(fallback, prompt);
+          if (retry.statusCode == 200) {
+            store.grokModel = fallback;
+            await store.save();
+            return _grokText(retry);
+          }
+          response = retry;
+        }
+      } catch (_) {
+        // Keep the original error if the model list cannot be loaded.
+      }
+      if (response.statusCode == 404) {
+        throw StateError('Модель Grok «$requested» недоступна для этого ключа. '
+          'Откройте Настройки → Grok → «Получить доступные модели».');
+      }
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw StateError('xAI отклонил ключ Grok. Нужен API-ключ из console.x.ai.');
+    }
+    if (response.statusCode == 402) {
+      throw StateError('xAI требует доступного баланса API. '
+        'Grok API — платный, подписка на Grok не заменяет API-баланс.');
+    }
+    if (response.statusCode == 429) {
+      throw StateError('Превышен лимит запросов xAI. Повторите позже.');
+    }
+    if (response.statusCode != 200) {
+      throw StateError('Grok: HTTP ${response.statusCode}. ${_safeError(response.body)}');
+    }
+    return _grokText(response);
   }
 
   static String _safeError(String raw) {

@@ -861,6 +861,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool saving = false;
   bool loadingGeminiModels = false;
   List<String> availableModels = const [];
+  bool loadingGrokModels = false;
+  List<String> availableGrokModels = const [];
 
   Future<void> loadGeminiModels() async {
     if (gemini.text.trim().isEmpty) {
@@ -878,6 +880,30 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) message(context, '$error');
     } finally {
       if (mounted) setState(() => loadingGeminiModels = false);
+    }
+  }
+
+
+  Future<void> loadGrokModels() async {
+    if (grok.text.trim().isEmpty) {
+      message(context, 'Сначала введите ключ xAI.');
+      return;
+    }
+    if (grok.text.trim().startsWith('gsk_')) {
+      message(context, 'Этот ключ от Groq Cloud. Для Grok нужен ключ xAI.');
+      return;
+    }
+    setState(() => loadingGrokModels = true);
+    try {
+      final options = await AiService(widget.store)
+        .listGrokModels(apiKey: grok.text.trim());
+      if (!mounted) return;
+      setState(() => availableGrokModels = options);
+      if (options.isEmpty) message(context, 'У этого ключа нет доступных текстовых моделей Grok.');
+    } catch (error) {
+      if (mounted) message(context, '$error');
+    } finally {
+      if (mounted) setState(() => loadingGrokModels = false);
     }
   }
 
@@ -939,8 +965,28 @@ class _SettingsPageState extends State<SettingsPage> {
         style: TextStyle(color: muted, fontSize: 13)),
       const SizedBox(height: 15), TextField(controller: grok, obscureText: true,
         autocorrect: false, decoration: const InputDecoration(labelText: 'xAI API key')),
+      const SizedBox(height: 8), const Text('Grok от xAI ≠ Groq Cloud. '
+        'Ключ Groq с префиксом gsk_ здесь не работает.',
+        style: TextStyle(color: muted, fontSize: 12)),
       const SizedBox(height: 10), TextField(controller: xm,
         decoration: const InputDecoration(labelText: 'Модель Grok')),
+      const SizedBox(height: 8), Align(alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          onPressed: loadingGrokModels ? null : loadGrokModels,
+          icon: Icon(loadingGrokModels ? Icons.hourglass_top_rounded : Icons.refresh_rounded),
+          label: Text(loadingGrokModels ? 'Проверяем модели…' : 'Получить доступные модели'))),
+      if (availableGrokModels.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        const Text('Выберите модель, доступную вашему ключу:',
+          style: TextStyle(color: muted, fontSize: 12)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 7, runSpacing: 5, children: availableGrokModels.take(12).map((model) =>
+          ChoiceChip(label: Text(model), selected: xm.text.trim() == model,
+            onSelected: (_) => setState(() => xm.text = model))).toList()),
+        const SizedBox(height: 6),
+        const Text('У xAI разные цены моделей. Перед выбором проверьте тариф.',
+          style: TextStyle(color: muted, fontSize: 12)),
+      ],
     ])),
     const SizedBox(height: 14),
     Surface(child: Column(children: [

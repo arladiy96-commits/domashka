@@ -7,13 +7,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
 import 'gemini_models.dart';
+import 'grok_models.dart';
 
 class AppStore extends ChangeNotifier {
   final _secure = const FlutterSecureStorage();
   final books = <BookRecord>[];
   final history = <StudyResult>[];
   String geminiKey = '', grokKey = '';
-  String geminiModel = GeminiModels.defaultModel, grokModel = 'grok-4.3';
+  String geminiModel = GeminiModels.defaultModel, grokModel = GrokModels.defaultModel;
   bool checkWithGemini = true, busy = false;
   String activity = '';
   double importProgress = 0;
@@ -36,7 +37,7 @@ class AppStore extends ChangeNotifier {
           geminiModel = GeminiModels.defaultModel;
           migratedModel = true;
         }
-        grokModel = (data['grokModel'] ?? grokModel).toString();
+        grokModel = GrokModels.normalize((data['grokModel'] ?? grokModel).toString());
         checkWithGemini = data['checkWithGemini'] != false;
       } catch (e) { debugPrint('Database load: $e'); }
     }
@@ -66,7 +67,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> updateSettings(String gemini, String grok, String gm, String xm, bool verify) async {
     geminiKey = gemini.trim(); grokKey = grok.trim();
-    geminiModel = GeminiModels.normalize(gm.isEmpty ? GeminiModels.defaultModel : gm); grokModel = xm.trim(); checkWithGemini = verify;
+    geminiModel = GeminiModels.normalize(gm.isEmpty ? GeminiModels.defaultModel : gm); grokModel = GrokModels.normalize(xm.trim().isEmpty ? GrokModels.defaultModel : xm.trim()); checkWithGemini = verify;
     await _secure.write(key: 'gemini_key', value: geminiKey);
     await _secure.write(key: 'grok_key', value: grokKey);
     await save();
