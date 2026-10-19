@@ -706,9 +706,10 @@ class OfflinePageHighlight extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(12),
-    child: InteractiveViewer(
-      minScale: 1, maxScale: 5,
-      child: AspectRatio(aspectRatio: 661 / 945,
+    child: AspectRatio(
+      aspectRatio: 661 / 945,
+      child: InteractiveViewer(
+        minScale: 1, maxScale: 5,
         child: LayoutBuilder(builder: (context, constraints) {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
@@ -728,7 +729,8 @@ class OfflinePageHighlight extends StatelessWidget {
               ))),
             ),
           ]);
-        })),
+        }),
+      ),
     ),
   );
 }
