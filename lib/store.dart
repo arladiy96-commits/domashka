@@ -67,9 +67,9 @@ class AppStore extends ChangeNotifier {
 
   Future<BookRecord?> importBook() async {
     final picked = await FilePicker.pickFiles(
-      type: FileType.custom, allowedExtensions: ['pdf'], withData: false);
-    if (picked == null || picked.files.isEmpty) return null;
-    final source = picked.files.single.path;
+      type: FileType.custom, allowedExtensions: ['pdf']);
+    if (picked.isEmpty) return null;
+    final source = picked.first.path;
     if (source == null) throw StateError('Не удалось прочитать выбранный файл.');
     busy = true; importProgress = 0; activity = 'Читаем учебник'; notifyListeners();
     PdfDocument? doc;
@@ -81,7 +81,7 @@ class AppStore extends ChangeNotifier {
       target = await File(source).copy('${folder.path}/$id.pdf');
       doc = await PdfDocument.openFile(target.path);
       final book = BookRecord(id: id,
-        title: picked.files.single.name.replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), ''),
+        title: picked.first.name.replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), ''),
         path: target.path, pageCount: doc.pages.length);
       for (var i = 0; i < doc.pages.length; i++) {
         try {
