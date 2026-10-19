@@ -8,7 +8,7 @@ import 'models.dart';
 
 /// A local textbook package. No API calls are made while importing or searching.
 class OfflineCatalog {
-  static final RegExp _pageName = RegExp(r'^pages/[0-9]{3}\.jpg$');
+  static final RegExp _pageName = RegExp(r'^pages/[0-9]{3}\.jpg
 
   static Future<BookRecord> install(
     String zipPath,
@@ -74,7 +74,8 @@ class OfflineCatalog {
       final entries = archive.files.where((e) => e.isFile && (
         e.name == 'manifest.json' ||
         e.name == 'catalog.sqlite' ||
-        _pageName.hasMatch(e.name)
+        _pageName.hasMatch(e.name) ||
+        _cropName.hasMatch(e.name)
       )).toList();
       if (entries.length < 3 || entries.length > 1001) {
         throw const FormatException('Неполный или повреждённый каталог.');
@@ -133,14 +134,20 @@ class OfflineCatalog {
     if (!book.isOffline) return null;
     final db = await openDatabase(book.path, readOnly: true);
     try {
-      final rows = await db.query(
-        'exercises',
-        columns: [
-          'number', 'text_ocr', 'crop_x0', 'crop_y0', 'crop_x1', 'crop_y1',
-        ],
-        where: 'book_id = ? AND printed_page = ? AND number = ?',
-        whereArgs: [book.id, printedPage, number.trim()],
-        limit: 1,
+      final schema = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'exercise_structures' LIMIT 1",
+      );
+      final hasStructures = schema.isNotEmpty;
+      final rows = await db.rawQuery(
+        hasStructures
+          ? 'SELECT e.number, e.text_ocr, e.crop_x0, e.crop_y0, '
+            'e.crop_x1, e.crop_y1, s.structure_json '
+            'FROM exercises e LEFT JOIN exercise_structures s '
+            'ON s.exercise_id = e.id '
+            'WHERE e.book_id = ? AND e.printed_page = ? AND e.number = ? LIMIT 1'
+          : 'SELECT number, text_ocr, crop_x0, crop_y0, crop_x1, crop_y1 '
+            'FROM exercises WHERE book_id = ? AND printed_page = ? AND number = ? LIMIT 1',
+        [book.id, printedPage, number.trim()],
       );
       if (rows.isEmpty) return null;
       return OfflineExercise.fromRow(rows.first);
@@ -158,16 +165,86 @@ class OfflineExercise {
     required this.top,
     required this.right,
     required this.bottom,
+    this.structure,
   });
   final String number, ocrText;
   final double left, top, right, bottom;
+  final Map<String, dynamic>? structure;
 
-  factory OfflineExercise.fromRow(Map<String, Object?> row) => OfflineExercise(
-    number: (row['number'] ?? '').toString(),
-    ocrText: (row['text_ocr'] ?? '').toString(),
-    left: (row['crop_x0'] as num?)?.toDouble() ?? 0,
-    top: (row['crop_y0'] as num?)?.toDouble() ?? 0,
-    right: (row['crop_x1'] as num?)?.toDouble() ?? 1,
-    bottom: (row['crop_y1'] as num?)?.toDouble() ?? 1,
-  );
+  bool get firstPassReviewed =>
+      structure?['review_status'] == 'first_pass_reviewed';
+  String get sourceStatement => (structure?['statement'] ?? '').toString().trim();
+  String get sourceCropImage =>
+      (structure?['source_crop_image'] ?? '').toString();
+  List<Map<String, dynamic>> get blocks =>
+      (structure?['blocks'] as List? ?? [])
+          .whereType<Map>()
+          .map((block) => Map<String, dynamic>.from(block))
+          .toList();
+
+  /// Keep every table cell and original figure data in the solver prompt.
+  /// Unreviewed OCR must never silently become trusted exercise text.
+  String get structuredSolveText {
+    if (!firstPassReviewed) return '';
+    final lines = <String>[sourceStatement];
+    for (final block in blocks) {
+      final kind = (block['type'] ?? '').toString();
+      if (kind == 'table') {
+        final title = (block['title'] ?? '').toString();
+        if (title.isNotEmpty) lines.add('Таблица: $title');
+        final headers = (block['columns'] as List? ?? []);
+        if (headers.isNotEmpty) lines.add(headers.join(' | '));
+        for (final row in (block['rows'] as List? ?? [])) {
+          if (row is List) {
+            lines.add(row.map((cell) => cell.toString().isEmpty
+                ? '□' : cell.toString()).join(' | '));
+          }
+        }
+      } else if (kind == 'expressions') {
+        lines.addAll((block['items'] as List? ?? []).map((v) => v.toString()));
+      } else if (kind == 'figure') {
+        lines.add('Описание рисунка: ${(block['description'] ?? '').toString()}');
+        if (block['data'] != null) {
+          lines.add('Данные рисунка: ${jsonEncode(block['data'])}');
+        }
+        if (block['requires_math_interpretation'] == true) {
+          lines.add('ВНИМАНИЕ: модель рисунка требует проверки. '
+              'Не додумывай неоднозначные элементы.');
+        }
+      }
+    }
+    final context = structure?['math_context'];
+    if (context is Map) {
+      lines.add('Учебная тема: ${(context['topic'] ?? '').toString()}.');
+      lines.add('Оформление для тетради: '
+          '${(context['recommended_notebook_format'] ?? '').toString()}.');
+      if (context['visual_check_required'] == true) {
+        lines.add('Проверка рисунка обязательна: если данных недостаточно, '
+            'не выдумывай ответ.');
+      }
+    }
+    return lines.where((x) => x.trim().isNotEmpty).join('\n');
+  }
+
+  factory OfflineExercise.fromRow(Map<String, Object?> row) {
+    Map<String, dynamic>? data;
+    final raw = row['structure_json'];
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(raw);
+        if (parsed is Map) data = Map<String, dynamic>.from(parsed);
+      } on FormatException {
+        // Older books and incomplete catalogs keep OCR fallback only.
+      }
+    }
+    return OfflineExercise(
+      number: (row['number'] ?? '').toString(),
+      ocrText: (row['text_ocr'] ?? '').toString(),
+      left: (row['crop_x0'] as num?)?.toDouble() ?? 0,
+      top: (row['crop_y0'] as num?)?.toDouble() ?? 0,
+      right: (row['crop_x1'] as num?)?.toDouble() ?? 1,
+      bottom: (row['crop_y1'] as num?)?.toDouble() ?? 1,
+      structure: data,
+    );
+  }
 }
