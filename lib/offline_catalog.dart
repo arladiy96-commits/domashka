@@ -22,7 +22,9 @@ class OfflineCatalog {
     if (await zipFile.length() > 80 * 1024 * 1024) {
       throw StateError('Архив слишком большой для импорта.');
     }
-    final archive = ZipDecoder().decodeBytes(await zipFile.readAsBytes());
+    final inputStream = InputFileStream(zipPath);
+    try {
+    final archive = ZipDecoder().decodeStream(inputStream, verify: true);
     final manifestEntry = archive.files.where((e) => e.name == 'manifest.json' && e.isFile);
     if (manifestEntry.length != 1 || !archive.files.any(
       (e) => e.name == 'catalog.sqlite' && e.isFile,
@@ -30,9 +32,11 @@ class OfflineCatalog {
       throw const FormatException('В архиве нет manifest.json или catalog.sqlite.');
     }
 
-    final manifest = jsonDecode(
-      utf8.decode(manifestEntry.single.content as List<int>),
-    ) as Map<String, dynamic>;
+    final manifestBytes = manifestEntry.single.readBytes();
+    if (manifestBytes == null) {
+      throw const FormatException('Не удалось прочитать manifest.json.');
+    }
+    final manifest = jsonDecode(utf8.decode(manifestBytes)) as Map<String, dynamic>;
     if (manifest['format'] != 'domashka-offline-book' ||
         manifest['format_version'] != 1) {
       throw const FormatException('Неподдерживаемый формат офлайн-учебника.');
@@ -83,7 +87,12 @@ class OfflineCatalog {
         }
         final target = File('${stage.path}/${entry.name}');
         await target.parent.create(recursive: true);
-        await target.writeAsBytes(entry.content as List<int>, flush: true);
+        final bytes = entry.readBytes();
+        if (bytes == null || bytes.length != entry.size) {
+          throw FormatException('Повреждённый файл в архиве: ${entry.name}');
+        }
+        await target.writeAsBytes(bytes, flush: true);
+        entry.clear();
         onProgress?.call((i + 1) / (entries.length + 1));
       }
       final dbFile = File('${stage.path}/catalog.sqlite');
@@ -112,6 +121,9 @@ class OfflineCatalog {
     } catch (_) {
       if (await stage.exists()) await stage.delete(recursive: true);
       rethrow;
+    }
+    } finally {
+      await inputStream.close();
     }
   }
 
