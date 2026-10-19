@@ -409,7 +409,7 @@ class _BookReaderState extends State<BookReader> {
       message(context, 'Нет такой страницы PDF. Проверь смещение нумерации.'); return;
     }
     setState(() { current = pdfPage; printed.text = (pdfPage - widget.book.offset).toString(); });
-    if (viewer.isReady) viewer.setCurrentPageNumber(pdfPage);
+    if (!widget.book.isOffline && viewer.isReady) viewer.setCurrentPageNumber(pdfPage);
     FocusManager.instance.primaryFocus?.unfocus();
   }
   Future<void> find() async {
@@ -422,6 +422,32 @@ class _BookReaderState extends State<BookReader> {
     jump(page);
     final num = exercise.text.trim();
     if (num.isEmpty) { message(context, 'Введите номер задания.'); return; }
+    if (widget.book.isOffline) {
+      setState(() => looking = true);
+      try {
+        final item = await widget.store.findOfflineExercise(widget.book, input, num);
+        if (!mounted) return;
+        if (item == null) {
+          message(context, 'В каталоге нет задания № $num на странице $input. '
+            'Проверь номер по изображению страницы.');
+        } else {
+          Navigator.push(context, MaterialPageRoute(builder: (_) =>
+            ConfirmExercisePage(
+              store: widget.store,
+              book: widget.book,
+              printedPage: input,
+              exercise: Exercise(item.number, item.ocrText),
+              offlineExercise: item,
+              uncertain: true,
+            )));
+        }
+      } catch (e) {
+        if (mounted) message(context, 'Не удалось открыть офлайн-задание: $e');
+      } finally {
+        if (mounted) setState(() => looking = false);
+      }
+      return;
+    }
     final pageText = widget.book.textAt(page);
     final matched = extractExercise(pageText, num);
     if (matched != null && matched.trim().isNotEmpty) {
@@ -477,18 +503,27 @@ class _BookReaderState extends State<BookReader> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: Text(widget.book.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      actions: [IconButton(onPressed: changeOffset,
+      actions: [if (!widget.book.isOffline) IconButton(onPressed: changeOffset,
         tooltip: 'Нумерация страниц', icon: const Icon(Icons.tune_rounded))]),
     body: Column(children: [
       Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9), child: Row(children: [
         IconButton(onPressed: () => jump(current - 1), icon: const Icon(Icons.chevron_left_rounded)),
-        Expanded(child: Center(child: Text('Страница PDF $current / ${widget.book.pageCount}',
+        Expanded(child: Center(child: Text('Страница $current / ${widget.book.pageCount}'
+          '${widget.book.isOffline ? ' · Офлайн' : ' · PDF'}',
           style: const TextStyle(color: ink, fontWeight: FontWeight.w700)))),
         IconButton(onPressed: () => jump(current + 1), icon: const Icon(Icons.chevron_right_rounded)),
       ])),
-      Expanded(child: PdfViewer.file(widget.book.path, controller: viewer,
-        initialPageNumber: current, params: const PdfViewerParams(
-          backgroundColor: Color(0xffe9eef7)))),
+      Expanded(child: widget.book.isOffline
+        ? Container(color: const Color(0xffe9eef7),
+            child: InteractiveViewer(key: ValueKey(current),
+              minScale: 1, maxScale: 5,
+              child: Center(child: Image.file(
+                File(widget.book.pageImagePath(current)), fit: BoxFit.contain,
+                errorBuilder: (context, error, stack) =>
+                  const Center(child: Text('Изображение страницы отсутствует.'))))))
+        : PdfViewer.file(widget.book.path, controller: viewer,
+            initialPageNumber: current, params: const PdfViewerParams(
+              backgroundColor: Color(0xffe9eef7)))),
       Surface(padding: const EdgeInsets.fromLTRB(14, 15, 14, 20), child: Column(children: [
         Row(children: [
           Expanded(child: TextField(controller: printed, keyboardType: TextInputType.number,
