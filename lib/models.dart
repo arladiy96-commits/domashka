@@ -44,19 +44,22 @@ class StudyResult {
   const StudyResult({required this.id, required this.problem, required this.answer,
     required this.notebook, required this.explanation, required this.rule,
     required this.source, required this.createdAt, this.bookId, this.page,
-    this.number, this.verified = false, this.warning = '', this.practice = const []});
+    this.number, this.verified = false, this.warning = '', this.practice = const [],
+    this.solutionBlocks = const []});
   final String id, problem, answer, notebook, explanation, rule, source, createdAt;
   final String? bookId, number;
   final int? page;
   final bool verified;
   final String warning;
   final List<PracticeTask> practice;
+  final List<Map<String, dynamic>> solutionBlocks;
   Map<String, dynamic> toJson() => {
     'id': id, 'problem': problem, 'answer': answer,
     'notebook': notebook, 'explanation': explanation, 'rule': rule,
     'source': source, 'createdAt': createdAt, 'bookId': bookId,
     'page': page, 'number': number, 'verified': verified, 'warning': warning,
-    'practice': practice.map((e) => e.toJson()).toList()};
+    'practice': practice.map((e) => e.toJson()).toList(),
+    'solutionBlocks': solutionBlocks};
   factory StudyResult.fromJson(Map<String, dynamic> data) => StudyResult(
     id: data['id'].toString(), problem: (data['problem'] ?? '').toString(),
     answer: (data['answer'] ?? '').toString(), notebook: (data['notebook'] ?? '').toString(),
@@ -66,7 +69,9 @@ class StudyResult {
     page: (data['page'] as num?)?.toInt(), number: data['number']?.toString(),
     verified: data['verified'] == true, warning: (data['warning'] ?? '').toString(),
     practice: ((data['practice'] as List?) ?? []).whereType<Map>().map(
-      (x) => PracticeTask.fromJson(Map<String, dynamic>.from(x))).toList());
+      (x) => PracticeTask.fromJson(Map<String, dynamic>.from(x))).toList(),
+    solutionBlocks: ((data['solutionBlocks'] as List?) ?? []).whereType<Map>()
+      .map((x) => Map<String, dynamic>.from(x)).toList());
 }
 
 String prettyJson(Object value) => const JsonEncoder.withIndent('  ').convert(value);
