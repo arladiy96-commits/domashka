@@ -1,0 +1,161 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:archive/archive.dart';
+import 'package:sqflite/sqflite.dart';
+
+import 'models.dart';
+
+/// A local textbook package. No API calls are made while importing or searching.
+class OfflineCatalog {
+  static final RegExp _pageName = RegExp(r'^pages/[0-9]{3}\.jpg$');
+
+  static Future<BookRecord> install(
+    String zipPath,
+    Directory appRoot, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final zipFile = File(zipPath);
+    if (!await zipFile.exists()) {
+      throw StateError('Не удалось открыть выбранный ZIP.');
+    }
+    if (await zipFile.length() > 80 * 1024 * 1024) {
+      throw StateError('Архив слишком большой для импорта.');
+    }
+    final archive = ZipDecoder().decodeBytes(await zipFile.readAsBytes());
+    final manifestEntry = archive.files.where((e) => e.name == 'manifest.json' && e.isFile);
+    if (manifestEntry.length != 1 || !archive.files.any(
+      (e) => e.name == 'catalog.sqlite' && e.isFile,
+    )) {
+      throw const FormatException('В архиве нет manifest.json или catalog.sqlite.');
+    }
+
+    final manifest = jsonDecode(
+      utf8.decode(manifestEntry.single.content as List<int>),
+    ) as Map<String, dynamic>;
+    if (manifest['format'] != 'domashka-offline-book' ||
+        manifest['format_version'] != 1) {
+      throw const FormatException('Неподдерживаемый формат офлайн-учебника.');
+    }
+    final id = (manifest['book_id'] ?? '').toString();
+    if (!RegExp(r'^[a-zA-Z0-9_-]{3,90}$').hasMatch(id)) {
+      throw const FormatException('Некорректный идентификатор учебника.');
+    }
+    final pageCount = (manifest['page_count'] as num?)?.toInt() ?? 0;
+    if (pageCount < 1 || pageCount > 999) {
+      throw const FormatException('Некорректное количество страниц.');
+    }
+
+    final shelf = Directory('${appRoot.path}/offline_books');
+    await shelf.create(recursive: true);
+    final destination = Directory('${shelf.path}/$id');
+    BookRecord makeRecord() => BookRecord(
+      id: id,
+      title: (manifest['book_title'] ?? 'Учебник').toString(),
+      path: '${destination.path}/catalog.sqlite',
+      offlineDirectory: destination.path,
+      pageCount: pageCount,
+    );
+    // Re-importing a previously installed package does not erase its data.
+    if (await File('${destination.path}/catalog.sqlite').exists()) {
+      return makeRecord();
+    }
+
+    final stage = Directory(
+      '${shelf.path}/.install_${DateTime.now().microsecondsSinceEpoch}',
+    );
+    await stage.create(recursive: true);
+    try {
+      var total = 0;
+      final entries = archive.files.where((e) => e.isFile && (
+        e.name == 'manifest.json' ||
+        e.name == 'catalog.sqlite' ||
+        _pageName.hasMatch(e.name)
+      )).toList();
+      if (entries.length < 3 || entries.length > 1001) {
+        throw const FormatException('Неполный или повреждённый каталог.');
+      }
+      for (var i = 0; i < entries.length; i++) {
+        final entry = entries[i];
+        total += entry.size;
+        if (total > 90 * 1024 * 1024) {
+          throw const FormatException('Распакованный архив слишком большой.');
+        }
+        final target = File('${stage.path}/${entry.name}');
+        await target.parent.create(recursive: true);
+        await target.writeAsBytes(entry.content as List<int>, flush: true);
+        onProgress?.call((i + 1) / (entries.length + 1));
+      }
+      final dbFile = File('${stage.path}/catalog.sqlite');
+      final db = await openDatabase(dbFile.path, readOnly: true);
+      try {
+        final rows = await db.rawQuery(
+          'SELECT COUNT(*) AS count FROM exercises WHERE book_id = ?',
+          [id],
+        );
+        final count = (rows.first['count'] as num?)?.toInt() ?? 0;
+        if (count < 1 || count != (manifest['exercise_count'] as num?)?.toInt()) {
+          throw const FormatException('Каталог заданий не совпадает с описанием.');
+        }
+      } finally {
+        await db.close();
+      }
+      if (!await File('${stage.path}/pages/001.jpg').exists()) {
+        throw const FormatException('В архиве отсутствуют изображения страниц.');
+      }
+      if (await destination.exists()) {
+        throw const FileSystemException('Каталог уже существует.', '${destination.path}');
+      }
+      await stage.rename(destination.path);
+      onProgress?.call(1);
+      return makeRecord();
+    } catch (_) {
+      if (await stage.exists()) await stage.delete(recursive: true);
+      rethrow;
+    }
+  }
+
+  static Future<OfflineExercise?> find(
+    BookRecord book, int printedPage, String number,
+  ) async {
+    if (!book.isOffline) return null;
+    final db = await openDatabase(book.path, readOnly: true);
+    try {
+      final rows = await db.query(
+        'exercises',
+        columns: [
+          'number', 'text_ocr', 'crop_x0', 'crop_y0', 'crop_x1', 'crop_y1',
+        ],
+        where: 'book_id = ? AND printed_page = ? AND number = ?',
+        whereArgs: [book.id, printedPage, number.trim()],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      return OfflineExercise.fromRow(rows.first);
+    } finally {
+      await db.close();
+    }
+  }
+}
+
+class OfflineExercise {
+  const OfflineExercise({
+    required this.number,
+    required this.ocrText,
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+  });
+  final String number, ocrText;
+  final double left, top, right, bottom;
+
+  factory OfflineExercise.fromRow(Map<String, Object?> row) => OfflineExercise(
+    number: (row['number'] ?? '').toString(),
+    ocrText: (row['text_ocr'] ?? '').toString(),
+    left: (row['crop_x0'] as num?)?.toDouble() ?? 0,
+    top: (row['crop_y0'] as num?)?.toDouble() ?? 0,
+    right: (row['crop_x1'] as num?)?.toDouble() ?? 1,
+    bottom: (row['crop_y1'] as num?)?.toDouble() ?? 1,
+  );
+}
