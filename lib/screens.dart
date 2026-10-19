@@ -8,6 +8,7 @@ import 'ai_service.dart';
 import 'models.dart';
 import 'store.dart';
 import 'offline_catalog.dart';
+import 'structured_exercise_view.dart';
 
 const ink = Color(0xff142b50);
 const accent = Color(0xff246af3);
@@ -436,9 +437,10 @@ class _BookReaderState extends State<BookReader> {
               store: widget.store,
               book: widget.book,
               printedPage: input,
-              exercise: Exercise(item.number, item.ocrText),
+              exercise: Exercise(item.number, item.firstPassReviewed
+                ? item.structuredSolveText : item.structure != null ? '' : item.ocrText),
               offlineExercise: item,
-              uncertain: true,
+              uncertain: !item.firstPassReviewed,
             )));
         }
       } catch (e) {
@@ -721,11 +723,29 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
         const Text('Оригинал задания (масштабируется двумя пальцами)',
           style: TextStyle(color: ink, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
-        OfflinePageHighlight(
+        if (widget.offlineExercise!.sourceCropImage.isNotEmpty)
+          ClipRRect(borderRadius: BorderRadius.circular(12),
+            child: InteractiveViewer(minScale: 1, maxScale: 5,
+              child: Image.file(
+                File('${widget.book!.offlineDirectory!}/${widget.offlineExercise!.sourceCropImage}'),
+                width: MediaQuery.sizeOf(context).width - 40,
+                fit: BoxFit.fitWidth,
+                errorBuilder: (context, error, stack) =>
+                  const Text('Фрагмент отсутствует. Открой страницу учебника.'),
+              )))
+        else OfflinePageHighlight(
           imagePath: widget.book!.pageImagePath(widget.printedPage!),
           exercise: widget.offlineExercise!),
+        if (widget.offlineExercise!.firstPassReviewed) ...[
+          const SizedBox(height: 14),
+          const Text('Таблицы и схемы из подготовленной базы',
+              style: TextStyle(color: ink, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          StructuredExerciseView(exercise: widget.offlineExercise!),
+        ],
         const SizedBox(height: 12),
-        if (widget.store.geminiKey.isNotEmpty)
+        if (!widget.offlineExercise!.firstPassReviewed &&
+            widget.store.geminiKey.isNotEmpty)
           SizedBox(width: double.infinity, child: OutlinedButton.icon(
             onPressed: recognizing ? null : readWithGemini,
             icon: recognizing
@@ -736,9 +756,10 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
               ? 'Читаем оригинал через Gemini...'
               : 'Прочитать точно с Gemini'),
           ))
-        else const Surface(color: Color(0xfff0f4fa), child: Text(
-          'Для точного чтения по изображению добавь ключ Gemini в настройках. '
-          'Без него можно исправить текст вручную.',
+        else if (!widget.offlineExercise!.firstPassReviewed)
+          const Surface(color: Color(0xfff0f4fa), child: Text(
+          'Это упражнение ещё не вычитано. Сверь условие с оригиналом, '
+          'либо прочитай выбранный фрагмент через Gemini.',
           style: TextStyle(color: muted),
         )),
         const SizedBox(height: 12),
@@ -750,7 +771,9 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
         if (widget.offlineExercise != null)
           Text(hasSavedText
               ? 'Сохранённое ранее условие — бесплатно и офлайн'
-              : 'Ниже черновик старого OCR. Таблицы и рисунки могут быть неполными.',
+              : widget.offlineExercise!.firstPassReviewed
+                ? 'Первичная вычитка по книге. Таблицы, схемы и данные включены в условие ниже.'
+                : 'Текст ещё не проверен; нужен полный ввод по оригиналу.',
             style: const TextStyle(color: muted, fontSize: 12)),
         const SizedBox(height: 13),
         TextField(controller: text, maxLines: null, minLines: 5,
@@ -760,9 +783,9 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
       const SizedBox(height: 14),
       if (widget.uncertain) Surface(color: const Color(0xfffff4e5),
         child: Text(widget.offlineExercise != null
-          ? 'В офлайн-базе текст автоматически распознан и НЕ проверен. '
-            'Для заданий с таблицами нажми «Прочитать точно с Gemini», '
-            'сверь результат с оригиналом и при необходимости исправь.'
+          ? 'Это задание пока НЕ прошло вычитку. '
+            'Ориентируйся на оригинальный фрагмент сверху. '
+            'При необходимости исправь условие вручную, а не полагайся на OCR.'
           : 'Не получилось уверенно отделить номер задания от текста. '
             'Проверь и при необходимости исправь условие.',
           style: const TextStyle(color: Color(0xff85510b)))),
