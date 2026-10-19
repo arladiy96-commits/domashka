@@ -646,14 +646,75 @@ class ConfirmExercisePage extends StatefulWidget {
 }
 class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
   late final TextEditingController text;
+  bool recognizing = false;
+  bool hasSavedText = false;
+
   @override
-  void initState() { super.initState(); text = TextEditingController(text: widget.exercise.text); }
+  void initState() {
+    super.initState();
+    String? saved;
+    if (widget.book?.isOffline == true && widget.printedPage != null) {
+      saved = widget.store.offlineCorrection(
+        widget.book!, widget.printedPage!, widget.exercise.number);
+    }
+    hasSavedText = saved != null;
+    text = TextEditingController(text: saved ?? widget.exercise.text);
+  }
+
   @override
   void dispose() { text.dispose(); super.dispose(); }
+
+  Future<void> readWithGemini() async {
+    if (recognizing || widget.offlineExercise == null ||
+        widget.book?.isOffline != true || widget.printedPage == null) return;
+    setState(() => recognizing = true);
+    try {
+      final result = await AiService(widget.store).readOfflineExercise(
+        widget.book!.pageImagePath(widget.printedPage!),
+        widget.offlineExercise!,
+      );
+      if (!mounted) return;
+      text.value = TextEditingValue(text: result,
+        selection: TextSelection.collapsed(offset: result.length));
+      setState(() => hasSavedText = false);
+      message(context, 'Gemini прочитал фрагмент. Проверь числа и таблицы перед решением.');
+    } catch (error) {
+      if (mounted) message(context, 'Ошибка распознавания: $error');
+    } finally {
+      if (mounted) setState(() => recognizing = false);
+    }
+  }
+
+  Future<void> confirmAndSolve() async {
+    final corrected = text.text.trim();
+    if (corrected.isEmpty) { message(context, 'Введи условие.'); return; }
+    if (recognizing) return;
+    if (widget.book?.isOffline == true && widget.printedPage != null) {
+      try {
+        await widget.store.saveOfflineCorrection(
+          widget.book!, widget.printedPage!,
+          widget.exercise.number, corrected,
+        );
+      } catch (error) {
+        if (mounted) message(context, 'Не удалось сохранить исправление: $error');
+        return;
+      }
+    }
+    if (!mounted) return;
+    startSolve(context, widget.store, corrected,
+      source: widget.source ?? (widget.book != null
+        ? 'Учебник: ${widget.book!.title}' : 'Карточка'),
+      bookId: widget.book?.id ?? widget.bookId,
+      page: widget.printedPage,
+      number: widget.exercise.number);
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Подтверждение')),
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Подтверждение')),
     body: ListView(padding: const EdgeInsets.all(20), children: [
-      const SectionHead('Всё правильно?', subtitle: 'Перед решением проверь, что все числа и знаки точны'),
+      const SectionHead('Всё правильно?',
+        subtitle: 'Перед решением проверь, что все числа и знаки точны'),
       const SizedBox(height: 15),
       if (widget.offlineExercise != null &&
           widget.book?.isOffline == true && widget.printedPage != null) ...[
@@ -664,35 +725,62 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
           imagePath: widget.book!.pageImagePath(widget.printedPage!),
           exercise: widget.offlineExercise!),
         const SizedBox(height: 12),
+        if (widget.store.geminiKey.isNotEmpty)
+          SizedBox(width: double.infinity, child: OutlinedButton.icon(
+            onPressed: recognizing ? null : readWithGemini,
+            icon: recognizing
+              ? const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.document_scanner_outlined),
+            label: Text(recognizing
+              ? 'Читаем оригинал через Gemini...'
+              : 'Прочитать точно с Gemini'),
+          ))
+        else const Surface(color: Color(0xfff0f4fa), child: Text(
+          'Для точного чтения по изображению добавь ключ Gemini в настройках. '
+          'Без него можно исправить текст вручную.',
+          style: TextStyle(color: muted),
+        )),
+        const SizedBox(height: 12),
       ],
       Surface(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('ЗАДАНИЕ ${widget.exercise.number}', style: const TextStyle(
           color: accent, fontWeight: FontWeight.w900, letterSpacing: 1)),
+        const SizedBox(height: 8),
+        if (widget.offlineExercise != null)
+          Text(hasSavedText
+              ? 'Сохранённое ранее условие — бесплатно и офлайн'
+              : 'Ниже черновик старого OCR. Таблицы и рисунки могут быть неполными.',
+            style: const TextStyle(color: muted, fontSize: 12)),
         const SizedBox(height: 13),
         TextField(controller: text, maxLines: null, minLines: 5,
           style: const TextStyle(color: ink, fontSize: 16, height: 1.5),
-          decoration: const InputDecoration(hintText: 'Условие задания')),
+          decoration: const InputDecoration(hintText: 'Полное условие задания')),
       ])),
       const SizedBox(height: 14),
       if (widget.uncertain) Surface(color: const Color(0xfffff4e5),
         child: Text(widget.offlineExercise != null
-          ? 'Распознанный текст может содержать ошибки в числах и знаках. '
-            'Сверь его с оригиналом и исправь перед решением.'
+          ? 'В офлайн-базе текст автоматически распознан и НЕ проверен. '
+            'Для заданий с таблицами нажми «Прочитать точно с Gemini», '
+            'сверь результат с оригиналом и при необходимости исправь.'
           : 'Не получилось уверенно отделить номер задания от текста. '
             'Проверь и при необходимости исправь условие.',
-          style: TextStyle(color: Color(0xff85510b)))) ,
+          style: const TextStyle(color: Color(0xff85510b)))),
       const SizedBox(height: 15),
       SizedBox(width: double.infinity, child: FilledButton.icon(
-        onPressed: () { if (text.text.trim().isEmpty) { message(context, 'Введи условие.'); return; }
-          startSolve(context, widget.store, text.text.trim(),
-            source: widget.source ?? (widget.book != null ? 'Учебник: ${widget.book!.title}' : 'Карточка'),
-            bookId: widget.book?.id ?? widget.bookId,
-            page: widget.printedPage, number: widget.exercise.number); },
-        icon: const Icon(Icons.auto_awesome), label: const Text('Подтвердить и решить'))),
+        onPressed: recognizing ? null : confirmAndSolve,
+        icon: const Icon(Icons.auto_awesome),
+        label: const Text('Подтвердить и решить'))),
       const SizedBox(height: 12),
-      const Text('Изображения и учебник не изменяются. Исправленный текст используется только для этого решения.',
-        textAlign: TextAlign.center, style: TextStyle(color: muted, fontSize: 12)),
-    ]));
+      Text(widget.offlineExercise != null
+        ? 'После подтверждения исправленный текст сохранится на телефоне. '
+          'Повторное распознавание этого задания не потребуется.'
+        : 'Изображения и учебник не изменяются. Исправленный текст '
+          'используется только для этого решения.',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: muted, fontSize: 12)),
+    ]),
+  );
 }
 
 /// Shows the authoritative textbook image with the recognized task highlighted.
