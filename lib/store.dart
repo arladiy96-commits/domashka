@@ -7,14 +7,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
 import 'gemini_models.dart';
-import 'grok_models.dart';
+import 'groq_models.dart';
 
 class AppStore extends ChangeNotifier {
   final _secure = const FlutterSecureStorage();
   final books = <BookRecord>[];
   final history = <StudyResult>[];
-  String geminiKey = '', grokKey = '';
-  String geminiModel = GeminiModels.defaultModel, grokModel = GrokModels.defaultModel;
+  String geminiKey = '', groqKey = '';
+  String geminiModel = GeminiModels.defaultModel, groqModel = GroqModels.defaultModel;
   bool checkWithGemini = true, busy = false;
   String activity = '';
   double importProgress = 0;
@@ -37,13 +37,21 @@ class AppStore extends ChangeNotifier {
           geminiModel = GeminiModels.defaultModel;
           migratedModel = true;
         }
-        grokModel = GrokModels.normalize((data['grokModel'] ?? grokModel).toString());
+        groqModel = GroqModels.normalize((data['groqModel'] ?? data['grokModel'] ?? groqModel).toString());
         checkWithGemini = data['checkWithGemini'] != false;
       } catch (e) { debugPrint('Database load: $e'); }
     }
     try {
       geminiKey = await _secure.read(key: 'gemini_key') ?? '';
-      grokKey = await _secure.read(key: 'grok_key') ?? '';
+      groqKey = await _secure.read(key: 'groq_key') ?? '';
+      if (groqKey.isEmpty) {
+        // Migrate the Groq key placed in the mislabeled Grok field.
+        final legacyKey = await _secure.read(key: 'grok_key') ?? '';
+        if (legacyKey.trim().startsWith('gsk_')) {
+          groqKey = legacyKey.trim();
+          await _secure.write(key: 'groq_key', value: groqKey);
+        }
+      }
     } catch (e) { debugPrint('Secure storage: $e'); }
     if (migratedModel) await save();
     notifyListeners();
@@ -54,7 +62,7 @@ class AppStore extends ChangeNotifier {
     final json = const JsonEncoder.withIndent('  ').convert({
       'books': books.map((e) => e.toJson()).toList(),
       'history': history.map((e) => e.toJson()).toList(),
-      'geminiModel': geminiModel, 'grokModel': grokModel,
+      'geminiModel': geminiModel, 'groqModel': groqModel,
       'checkWithGemini': checkWithGemini,
     });
     final file = File('${_root!.path}/domashka.json');
@@ -65,11 +73,11 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateSettings(String gemini, String grok, String gm, String xm, bool verify) async {
-    geminiKey = gemini.trim(); grokKey = grok.trim();
-    geminiModel = GeminiModels.normalize(gm.isEmpty ? GeminiModels.defaultModel : gm); grokModel = GrokModels.normalize(xm.trim().isEmpty ? GrokModels.defaultModel : xm.trim()); checkWithGemini = verify;
+  Future<void> updateSettings(String gemini, String groq, String gm, String xm, bool verify) async {
+    geminiKey = gemini.trim(); groqKey = groq.trim();
+    geminiModel = GeminiModels.normalize(gm.isEmpty ? GeminiModels.defaultModel : gm); groqModel = GroqModels.normalize(xm.trim().isEmpty ? GroqModels.defaultModel : xm.trim()); checkWithGemini = verify;
     await _secure.write(key: 'gemini_key', value: geminiKey);
-    await _secure.write(key: 'grok_key', value: grokKey);
+    await _secure.write(key: 'groq_key', value: groqKey);
     await save();
   }
 

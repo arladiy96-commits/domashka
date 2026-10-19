@@ -655,7 +655,7 @@ class _ProcessingPageState extends State<ProcessingPage> {
           const SizedBox(height: 13), const CircularProgressIndicator(),
           const SizedBox(height: 15), const Text('Решаем и проверяем...', style: TextStyle(
             color: ink, fontSize: 19, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 9), const Text('Математический движок · Grok · Gemini',
+          const SizedBox(height: 9), const Text('Математический движок · Groq Cloud · Gemini',
             style: TextStyle(color: muted), textAlign: TextAlign.center),
         ] else ...[
           const Icon(Icons.error_outline_rounded, color: Colors.orange, size: 50),
@@ -721,7 +721,7 @@ class _SolutionPageState extends State<SolutionPage> {
               icon: const Icon(Icons.copy_rounded, color: accent))]),
           const SizedBox(height: 10),
           Text([result.notebook, result.explanation, result.rule][view].isEmpty
-            ? 'Здесь пока нет готового объяснения. Для сложной задачи подключите Grok.'
+            ? 'Здесь пока нет готового объяснения. Для сложной задачи подключите Groq Cloud.'
             : [result.notebook, result.explanation, result.rule][view],
             style: const TextStyle(fontSize: 16, height: 1.6, color: ink)),
         ])),
@@ -730,7 +730,7 @@ class _SolutionPageState extends State<SolutionPage> {
           const SectionHead('Закрепим тему?', subtitle: 'Попробуйте решить три похожих задания'),
           const SizedBox(height: 13), PracticePanel(tasks: result.practice),
         ] else const Surface(child: Text('Похожие задания появятся после решения '
-          'поддерживаемого примера или при подключении Grok.',
+          'поддерживаемого примера или при подключении Groq Cloud.',
           style: TextStyle(color: muted))),
       ]));
   }
@@ -856,13 +856,13 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 class _SettingsPageState extends State<SettingsPage> {
-  late final TextEditingController gemini, grok, gm, xm;
+  late final TextEditingController gemini, groq, gm, xm;
   late bool verify;
   bool saving = false;
   bool loadingGeminiModels = false;
   List<String> availableModels = const [];
-  bool loadingGrokModels = false;
-  List<String> availableGrokModels = const [];
+  bool loadingGroqModels = false;
+  List<String> availableGroqModels = const [];
 
   Future<void> loadGeminiModels() async {
     if (gemini.text.trim().isEmpty) {
@@ -884,26 +884,22 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
 
-  Future<void> loadGrokModels() async {
-    if (grok.text.trim().isEmpty) {
-      message(context, 'Сначала введите ключ xAI.');
+  Future<void> loadGroqModels() async {
+    if (groq.text.trim().isEmpty) {
+      message(context, 'Сначала введите ключ Groq Cloud.');
       return;
     }
-    if (grok.text.trim().startsWith('gsk_')) {
-      message(context, 'Этот ключ от Groq Cloud. Для Grok нужен ключ xAI.');
-      return;
-    }
-    setState(() => loadingGrokModels = true);
+    setState(() => loadingGroqModels = true);
     try {
       final options = await AiService(widget.store)
-        .listGrokModels(apiKey: grok.text.trim());
+        .listGroqModels(apiKey: groq.text.trim());
       if (!mounted) return;
-      setState(() => availableGrokModels = options);
-      if (options.isEmpty) message(context, 'У этого ключа нет доступных текстовых моделей Grok.');
+      setState(() => availableGroqModels = options);
+      if (options.isEmpty) message(context, 'У этого ключа нет доступных текстовых моделей Groq.');
     } catch (error) {
       if (mounted) message(context, '$error');
     } finally {
-      if (mounted) setState(() => loadingGrokModels = false);
+      if (mounted) setState(() => loadingGroqModels = false);
     }
   }
 
@@ -911,18 +907,18 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     gemini = TextEditingController(text: widget.store.geminiKey);
-    grok = TextEditingController(text: widget.store.grokKey);
+    groq = TextEditingController(text: widget.store.groqKey);
     gm = TextEditingController(text: widget.store.geminiModel);
-    xm = TextEditingController(text: widget.store.grokModel);
+    xm = TextEditingController(text: widget.store.groqModel);
     verify = widget.store.checkWithGemini;
   }
   @override
   void dispose() {
-    gemini.dispose(); grok.dispose(); gm.dispose(); xm.dispose(); super.dispose();
+    gemini.dispose(); groq.dispose(); gm.dispose(); xm.dispose(); super.dispose();
   }
   Future<void> save() async {
     setState(() => saving = true);
-    try { await widget.store.updateSettings(gemini.text, grok.text, gm.text, xm.text, verify);
+    try { await widget.store.updateSettings(gemini.text, groq.text, gm.text, xm.text, verify);
       if (mounted) message(context, 'Настройки сохранены на телефоне');
     } catch (e) { if (mounted) message(context, 'Ошибка сохранения: $e'); }
     finally { if (mounted) setState(() => saving = false); }
@@ -959,32 +955,32 @@ class _SettingsPageState extends State<SettingsPage> {
     const SizedBox(height: 14),
     Surface(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Row(children: [Icon(Icons.psychology_rounded, color: Color(0xff754be8)),
-        SizedBox(width: 10), Text('Grok — решение и объяснение',
+        SizedBox(width: 10), Text('Groq Cloud — решение и объяснение',
           style: TextStyle(color: ink, fontSize: 17, fontWeight: FontWeight.w900))]),
       const SizedBox(height: 10), const Text('Обрабатывает сложные задачи, объясняет правила и предлагает тренировку.',
         style: TextStyle(color: muted, fontSize: 13)),
-      const SizedBox(height: 15), TextField(controller: grok, obscureText: true,
-        autocorrect: false, decoration: const InputDecoration(labelText: 'xAI API key')),
-      const SizedBox(height: 8), const Text('Grok от xAI ≠ Groq Cloud. '
-        'Ключ Groq с префиксом gsk_ здесь не работает.',
+      const SizedBox(height: 15), TextField(controller: groq, obscureText: true,
+        autocorrect: false, decoration: const InputDecoration(labelText: 'Groq Cloud API key')),
+      const SizedBox(height: 8), const Text('Подключение к console.groq.com. '
+        'Ключ Groq обычно начинается с gsk_. Доступны бесплатные лимиты.',
         style: TextStyle(color: muted, fontSize: 12)),
       const SizedBox(height: 10), TextField(controller: xm,
-        decoration: const InputDecoration(labelText: 'Модель Grok')),
+        decoration: const InputDecoration(labelText: 'Модель Groq Cloud')),
       const SizedBox(height: 8), Align(alignment: Alignment.centerLeft,
         child: OutlinedButton.icon(
-          onPressed: loadingGrokModels ? null : loadGrokModels,
-          icon: Icon(loadingGrokModels ? Icons.hourglass_top_rounded : Icons.refresh_rounded),
-          label: Text(loadingGrokModels ? 'Проверяем модели…' : 'Получить доступные модели'))),
-      if (availableGrokModels.isNotEmpty) ...[
+          onPressed: loadingGroqModels ? null : loadGroqModels,
+          icon: Icon(loadingGroqModels ? Icons.hourglass_top_rounded : Icons.refresh_rounded),
+          label: Text(loadingGroqModels ? 'Проверяем модели…' : 'Получить доступные модели'))),
+      if (availableGroqModels.isNotEmpty) ...[
         const SizedBox(height: 6),
         const Text('Выберите модель, доступную вашему ключу:',
           style: TextStyle(color: muted, fontSize: 12)),
         const SizedBox(height: 8),
-        Wrap(spacing: 7, runSpacing: 5, children: availableGrokModels.take(12).map((model) =>
+        Wrap(spacing: 7, runSpacing: 5, children: availableGroqModels.take(12).map((model) =>
           ChoiceChip(label: Text(model), selected: xm.text.trim() == model,
             onSelected: (_) => setState(() => xm.text = model))).toList()),
         const SizedBox(height: 6),
-        const Text('У xAI разные цены моделей. Перед выбором проверьте тариф.',
+        const Text('Проверяйте лимиты выбранной модели в Groq Cloud.',
           style: TextStyle(color: muted, fontSize: 12)),
       ],
     ])),
@@ -1006,7 +1002,7 @@ class _SettingsPageState extends State<SettingsPage> {
       icon: const Icon(Icons.save_outlined), label: Text(saving ? 'Сохранение...' : 'Сохранить настройки'))),
     const SizedBox(height: 20),
     const Text('Бесплатно без ключей работают простые примеры, уравнения, тренировки, '
-      'импорт текстовых PDF и просмотр книг. API xAI/Grok тарифицируется отдельно; '
+      'импорт текстовых PDF и просмотр книг. Groq Cloud предоставляет ограниченный бесплатный доступ; '
       'доступность бесплатного лимита Gemini зависит от аккаунта и модели. '
       'Автоматическое обновление APK появится после настройки постоянной подписи.',
       textAlign: TextAlign.center, style: TextStyle(color: muted, fontSize: 12, height: 1.5)),

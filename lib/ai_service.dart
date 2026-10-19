@@ -6,7 +6,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
 import 'math_engine.dart';
 import 'gemini_models.dart';
-import 'grok_models.dart';
+import 'groq_models.dart';
 import 'store.dart';
 
 class AiService {
@@ -119,34 +119,29 @@ class AiService {
   }
 
 
-  /// Lists text models visible to this xAI API key; no inference call.
-  Future<List<String>> listGrokModels({String? apiKey}) async {
-    final key = (apiKey ?? store.grokKey).trim();
-    if (key.isEmpty) throw StateError('Введите API-ключ xAI.');
-    if (key.startsWith('gsk_')) {
-      throw StateError('Это ключ Groq Cloud, а не Grok от xAI. '
-        'Для Grok нужен ключ из console.x.ai.');
+
+  /// Fetch active models from the user's GroqCloud account without inference.
+  Future<List<String>> listGroqModels({String? apiKey}) async {
+    final key = (apiKey ?? store.groqKey).trim();
+    if (key.isEmpty) throw StateError('Сначала укажите ключ Groq Cloud.');
+    if (key.startsWith('xai-')) {
+      throw StateError('Это ключ xAI, а нужен ключ из console.groq.com.');
     }
-    final response = await http.get(Uri.parse('https://api.x.ai/v1/models'),
+    final response = await http.get(GroqModels.modelsUri,
       headers: {'Authorization': 'Bearer $key'},
     ).timeout(const Duration(seconds: 25));
-    if (response.statusCode == 401 || response.statusCode == 403) {
-      throw StateError('xAI отклонил ключ. Проверьте его в console.x.ai.');
-    }
-    if (response.statusCode != 200) {
-      throw StateError('Не удалось получить модели xAI: HTTP '
-          '${response.statusCode}. ${_safeError(response.body)}');
-    }
-    return GrokModels.availableFromResponse(
+    _checkGroqResponse(response);
+    return GroqModels.availableFromResponse(
       jsonDecode(response.body) as Map<String, dynamic>);
   }
 
-  Future<http.Response> _grokRequest(String model, String prompt) {
-    return http.post(Uri.parse('https://api.x.ai/v1/chat/completions'),
-      headers: {'Authorization': 'Bearer ${store.grokKey}',
+  Future<http.Response> _groqRequest(String model, String prompt) {
+    return http.post(GroqModels.completionsUri,
+      headers: {'Authorization': 'Bearer ${store.groqKey}',
         'Content-Type': 'application/json'},
       body: jsonEncode({
         'model': model,
+        'temperature': 0.2,
         'messages': [
           {'role': 'system', 'content': 'Ты опытный учитель начальных классов '
             'русскоязычной школы Казахстана. Строго придерживайся программы '
@@ -158,60 +153,73 @@ class AiService {
     ).timeout(const Duration(seconds: 80));
   }
 
-  static String _grokText(http.Response response) {
+  void _checkGroqResponse(http.Response response) {
+    final status = response.statusCode;
+    if (status == 200) return;
+    if (status == 401) {
+      throw StateError('Groq отклонил API-ключ. Проверьте ключ в console.groq.com.');
+    }
+    if (status == 403) {
+      throw StateError('У ключа нет разрешения на выбранную модель Groq. '
+        'Проверьте ограничения проекта.');
+    }
+    if (status == 404) {
+      throw StateError('Выбранная модель Groq недоступна. '
+        'Откройте настройки → Groq Cloud → Получить доступные модели.');
+    }
+    if (status == 429) {
+      throw StateError('Исчерпан текущий лимит Groq Cloud. '
+        'Попробуйте позже. Платные запросы автоматически не включаются.');
+    }
+    if (status == 413) {
+      throw StateError('Слишком длинное задание. Попробуйте разделить его на пункты.');
+    }
+    if (status == 402) {
+      throw StateError('Недостаточно доступного баланса или квоты Groq.');
+    }
+    if (status >= 500) {
+      throw StateError('Groq временно недоступен (HTTP $status). Повторите позже.');
+    }
+    throw StateError('Groq HTTP $status: ${_safeError(response.body)}');
+  }
+
+  static String _groqText(http.Response response) {
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final choices = data['choices'] as List? ?? [];
-    if (choices.isEmpty) throw StateError('Grok не предоставил ответ.');
-    final text = (((choices.first as Map)['message'] as Map?)?['content'] ?? '').toString();
-    if (text.trim().isEmpty) throw StateError('Grok вернул пустой ответ.');
+    if (choices.isEmpty) throw StateError('Groq не вернул решение.');
+    final reply = ((choices.first as Map)['message'] as Map?)?['content'];
+    final text = (reply ?? '').toString().trim();
+    if (text.isEmpty) throw StateError('Groq вернул пустой ответ.');
     return text;
   }
 
-  Future<String> _grok(String prompt) async {
-    if (store.grokKey.isEmpty) throw StateError('Добавьте ключ xAI в настройках.');
-    if (store.grokKey.trim().startsWith('gsk_')) {
-      throw StateError('Ключ Groq Cloud (gsk_) не подходит для Grok от xAI. '
-          'Это два разных сервиса.');
+  Future<String> _groq(String prompt) async {
+    if (store.groqKey.isEmpty) {
+      throw StateError('Добавьте ключ Groq Cloud в настройках.');
     }
-    final requested = GrokModels.normalize(store.grokModel);
-    var response = await _grokRequest(requested, prompt);
+    final current = GroqModels.normalize(store.groqModel);
+    var response = await _groqRequest(current, prompt);
     if (response.statusCode == 404) {
-      // Only retry with a documented, same-price-class model. Never
-      // silently upgrade to a more expensive Grok 4.7.
+      // Retry once only with a known production text model on a missing
+      // model, never on rate limit or billing errors.
       try {
-        final accessible = await listGrokModels();
-        final fallback = GrokModels.samePriceFallback(accessible, requested);
-        if (fallback != null) {
-          final retry = await _grokRequest(fallback, prompt);
-          if (retry.statusCode == 200) {
-            store.grokModel = fallback;
+        final list = await listGroqModels();
+        final alternative = GroqModels.fallback(list, current);
+        if (alternative != null) {
+          final attempt = await _groqRequest(alternative, prompt);
+          if (attempt.statusCode == 200) {
+            store.groqModel = alternative;
             await store.save();
-            return _grokText(retry);
+            return _groqText(attempt);
           }
-          response = retry;
+          response = attempt;
         }
       } catch (_) {
-        // Keep the original error if the model list cannot be loaded.
-      }
-      if (response.statusCode == 404) {
-        throw StateError('Модель Grok «$requested» недоступна для этого ключа. '
-          'Откройте Настройки → Grok → «Получить доступные модели».');
+        // Present the original 404 if discovery is unavailable.
       }
     }
-    if (response.statusCode == 401 || response.statusCode == 403) {
-      throw StateError('xAI отклонил ключ Grok. Нужен API-ключ из console.x.ai.');
-    }
-    if (response.statusCode == 402) {
-      throw StateError('xAI требует доступного баланса API. '
-        'Grok API — платный, подписка на Grok не заменяет API-баланс.');
-    }
-    if (response.statusCode == 429) {
-      throw StateError('Превышен лимит запросов xAI. Повторите позже.');
-    }
-    if (response.statusCode != 200) {
-      throw StateError('Grok: HTTP ${response.statusCode}. ${_safeError(response.body)}');
-    }
-    return _grokText(response);
+    _checkGroqResponse(response);
+    return _groqText(response);
   }
 
   static String _safeError(String raw) {
@@ -293,9 +301,9 @@ class AiService {
     bool verified = engine != null;
     final warnings = <String>[];
 
-    if (store.grokKey.isNotEmpty) {
+    if (store.groqKey.isNotEmpty) {
       try {
-        final raw = await _grok('Реши задание для второго класса и объясни маме, как учить ребёнка. '
+        final raw = await _groq('Реши задание для второго класса и объясни маме, как учить ребёнка. '
           'Условие: $problem\n'
           'Верни СТРОГО JSON объект: '
           '{"answer":"краткий ответ","notebook":"решение в тетрадь",'
@@ -304,13 +312,13 @@ class AiService {
           'Для текстовой задачи сначала короткая запись, затем действия и ответ. '
           'Не делай сложнее программы второго класса. Дай ровно три полезных похожих задания.');
         final decoded = _json(raw);
-        if (decoded is! Map) throw const FormatException('Неправильный JSON от Grok.');
+        if (decoded is! Map) throw const FormatException('Неправильный JSON от Groq.');
         final aiAnswer = (decoded['answer'] ?? '').toString();
         final aiNotebook = (decoded['notebook'] ?? '').toString();
         final aiExplanation = (decoded['explanation'] ?? '').toString();
         final aiRule = (decoded['rule'] ?? '').toString();
         if (engine != null && !MathEngine.sameValue(engine, aiAnswer)) {
-          warnings.add('Ответ Grok отличается от независимого вычисления. '
+          warnings.add('Ответ Groq отличается от независимого вычисления. '
             'Показан проверенный расчёт; объяснение ИИ требует внимания.');
         } else {
           if (aiAnswer.isNotEmpty) answer = aiAnswer;
@@ -325,10 +333,10 @@ class AiService {
           if (items.isNotEmpty) practice = items;
         }
       } catch (error) {
-        warnings.add('Grok: $error');
+        warnings.add('Groq: $error');
       }
     } else if (engine == null) {
-      warnings.add('Нужно подключить Grok: задача не относится к поддерживаемым локальным примерам.');
+      warnings.add('Нужно подключить Groq: задача не относится к поддерживаемым локальным примерам.');
     }
 
     if (engine == null && answer.isNotEmpty && store.checkWithGemini && store.geminiKey.isNotEmpty) {
