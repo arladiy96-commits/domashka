@@ -1,13 +1,16 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
 import 'math_engine.dart';
 import 'gemini_models.dart';
 import 'groq_models.dart';
 import 'store.dart';
+import 'offline_catalog.dart';
 
 class AiService {
   AiService(this.store);
@@ -252,6 +255,47 @@ class AiService {
       return jsonDecode(text.substring(listStart, listEnd + 1));
     }
     throw const FormatException('Модель вернула ответ в неверном формате.');
+  }
+
+  /// Read only the already located task from the original image. Search stays offline.
+  /// The output is a draft; user confirms and edits before it is saved.
+  Future<String> readOfflineExercise(String pageImagePath, OfflineExercise task) async {
+    if (store.geminiKey.isEmpty) {
+      throw StateError('Добавьте ключ Gemini в настройках для чтения изображения.');
+    }
+    final bytes = await File(pageImagePath).readAsBytes();
+    final page = img.decodeImage(bytes);
+    if (page == null) throw StateError('Не удалось прочитать страницу учебника.');
+
+    final left = (task.left.clamp(0.0, 1.0) * page.width).floor();
+    final top = (task.top.clamp(0.0, 1.0) * page.height).floor();
+    final right = (task.right.clamp(0.0, 1.0) * page.width).ceil();
+    final bottom = (task.bottom.clamp(0.0, 1.0) * page.height).ceil();
+    final paddingX = (page.width * 0.012).ceil();
+    final paddingY = (page.height * 0.012).ceil();
+    final x0 = (left - paddingX).clamp(0, page.width - 1);
+    final y0 = (top - paddingY).clamp(0, page.height - 1);
+    final x1 = (right + paddingX).clamp(x0 + 1, page.width);
+    final y1 = (bottom + paddingY).clamp(y0 + 1, page.height);
+    final crop = img.copyCrop(page, x: x0, y: y0,
+      width: x1 - x0, height: y1 - y0);
+    final jpeg = Uint8List.fromList(img.encodeJpg(crop, quality: 94));
+
+    final result = await _gemini(
+      'На изображении только одно упражнение №${task.number} из учебника математики '
+      'за 2 класс. Дословно перепиши ПОЛНОЕ условие без решения. '
+      'Обязательно сохрани ВСЕ числа, арифметические знаки, подзадания и варианты. '
+      'Если есть таблицы, перепиши КАЖДУЮ ячейку в виде понятной Markdown-таблицы '
+      'с правильным порядком строк и столбцов. '
+      'Если условие зависит от рисунка, кратко опиши сам рисунок и все значения '
+      'на нём, не придумывая отсутствующие элементы. '
+      'Не переписывай соседние упражнения. Не угадывай: если цифра не читается, '
+      'обозначь [неразборчиво]. Верни только условие задания, без комментариев.',
+      image: jpeg, mime: 'image/jpeg',
+    );
+    final value = result.trim();
+    if (value.isEmpty) throw StateError('Gemini не смог прочитать условие.');
+    return value;
   }
 
   Future<List<Exercise>> readImage(Uint8List image, {String mime = 'image/jpeg'}) async {
