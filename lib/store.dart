@@ -8,6 +8,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
 import 'gemini_models.dart';
 import 'groq_models.dart';
+import 'offline_catalog.dart';
 
 class AppStore extends ChangeNotifier {
   final _secure = const FlutterSecureStorage();
@@ -119,9 +120,48 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  /// Imports a prepared offline textbook package without Gemini or Groq.
+  Future<BookRecord?> importOfflineBook() async {
+    final picked = await FilePicker.pickFiles(
+      type: FileType.custom, allowedExtensions: ['zip']);
+    if (picked.isEmpty) return null;
+    final source = picked.first.path;
+    if (source == null) throw StateError('Не удалось открыть ZIP-файл.');
+    busy = true;
+    activity = 'Устанавливаем офлайн-каталог';
+    importProgress = 0;
+    notifyListeners();
+    try {
+      final book = await OfflineCatalog.install(source, _root!,
+        onProgress: (value) {
+          importProgress = value;
+          notifyListeners();
+        });
+      if (!books.any((b) => b.id == book.id)) {
+        books.insert(0, book);
+        await save();
+      }
+      return books.firstWhere((b) => b.id == book.id);
+    } finally {
+      busy = false;
+      activity = '';
+      importProgress = 0;
+      notifyListeners();
+    }
+  }
+
+  Future<OfflineExercise?> findOfflineExercise(
+    BookRecord book, int page, String number,
+  ) => OfflineCatalog.find(book, page, number);
+
   Future<void> deleteBook(BookRecord book) async {
     books.remove(book); await save();
-    if (await File(book.path).exists()) await File(book.path).delete();
+    if (book.isOffline) {
+      final folder = Directory(book.offlineDirectory!);
+      if (await folder.exists()) await folder.delete(recursive: true);
+    } else if (await File(book.path).exists()) {
+      await File(book.path).delete();
+    }
   }
 
   Future<void> remember(StudyResult result) async {
