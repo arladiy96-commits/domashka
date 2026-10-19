@@ -378,7 +378,7 @@ class _BookReaderState extends State<BookReader> {
   }
   @override
   void dispose() {
-    viewer.removeListener(_listenViewer); viewer.dispose();
+    viewer.removeListener(_listenViewer);
     printed.dispose(); exercise.dispose(); super.dispose();
   }
   void jump(int pdfPage) {

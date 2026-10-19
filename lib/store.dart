@@ -66,7 +66,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<BookRecord?> importBook() async {
-    final picked = await FilePicker.platform.pickFiles(
+    final picked = await FilePicker.pickFiles(
       type: FileType.custom, allowedExtensions: ['pdf'], withData: false);
     if (picked == null || picked.files.isEmpty) return null;
     final source = picked.files.single.path;
