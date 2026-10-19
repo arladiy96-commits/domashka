@@ -632,13 +632,15 @@ class ExerciseSelectionPage extends StatelessWidget {
 
 class ConfirmExercisePage extends StatefulWidget {
   const ConfirmExercisePage({super.key, required this.store, required this.exercise,
-    this.book, this.bookId, this.printedPage, this.source, this.uncertain = false});
+    this.book, this.bookId, this.printedPage, this.source,
+    this.offlineExercise, this.uncertain = false});
   final AppStore store;
   final Exercise exercise;
   final BookRecord? book;
   final String? bookId, source;
   final int? printedPage;
   final bool uncertain;
+  final OfflineExercise? offlineExercise;
   @override
   State<ConfirmExercisePage> createState() => _ConfirmExercisePageState();
 }
@@ -653,6 +655,16 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
     body: ListView(padding: const EdgeInsets.all(20), children: [
       const SectionHead('Всё правильно?', subtitle: 'Перед решением проверь, что все числа и знаки точны'),
       const SizedBox(height: 15),
+      if (widget.offlineExercise != null &&
+          widget.book?.isOffline == true && widget.printedPage != null) ...[
+        const Text('Оригинал задания (масштабируется двумя пальцами)',
+          style: TextStyle(color: ink, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        OfflinePageHighlight(
+          imagePath: widget.book!.pageImagePath(widget.printedPage!),
+          exercise: widget.offlineExercise!),
+        const SizedBox(height: 12),
+      ],
       Surface(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('ЗАДАНИЕ ${widget.exercise.number}', style: const TextStyle(
           color: accent, fontWeight: FontWeight.w900, letterSpacing: 1)),
@@ -662,9 +674,12 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
           decoration: const InputDecoration(hintText: 'Условие задания')),
       ])),
       const SizedBox(height: 14),
-      if (widget.uncertain) const Surface(color: Color(0xfffff4e5),
-        child: Text('Не получилось уверенно отделить номер задания от текста. '
-          'Проверь и при необходимости исправь условие.',
+      if (widget.uncertain) Surface(color: const Color(0xfffff4e5),
+        child: Text(widget.offlineExercise != null
+          ? 'Распознанный текст может содержать ошибки в числах и знаках. '
+            'Сверь его с оригиналом и исправь перед решением.'
+          : 'Не получилось уверенно отделить номер задания от текста. '
+            'Проверь и при необходимости исправь условие.',
           style: TextStyle(color: Color(0xff85510b)))) ,
       const SizedBox(height: 15),
       SizedBox(width: double.infinity, child: FilledButton.icon(
@@ -678,6 +693,44 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
       const Text('Изображения и учебник не изменяются. Исправленный текст используется только для этого решения.',
         textAlign: TextAlign.center, style: TextStyle(color: muted, fontSize: 12)),
     ]));
+}
+
+/// Shows the authoritative textbook image with the recognized task highlighted.
+class OfflinePageHighlight extends StatelessWidget {
+  const OfflinePageHighlight({
+    super.key, required this.imagePath, required this.exercise,
+  });
+  final String imagePath;
+  final OfflineExercise exercise;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(12),
+    child: InteractiveViewer(
+      minScale: 1, maxScale: 5,
+      child: AspectRatio(aspectRatio: 661 / 945,
+        child: LayoutBuilder(builder: (context, constraints) {
+          final w = constraints.maxWidth;
+          final h = constraints.maxHeight;
+          return Stack(fit: StackFit.expand, children: [
+            Image.file(File(imagePath), fit: BoxFit.fill,
+              errorBuilder: (context, error, stack) =>
+                const Center(child: Text('Страница недоступна.'))),
+            Positioned(
+              left: w * exercise.left,
+              top: h * exercise.top,
+              width: w * (exercise.right - exercise.left),
+              height: h * (exercise.bottom - exercise.top),
+              child: IgnorePointer(child: Container(decoration: BoxDecoration(
+                border: Border.all(color: Colors.deepOrange, width: 2.8),
+                color: Colors.orange.withOpacity(.07),
+                borderRadius: BorderRadius.circular(4),
+              ))),
+            ),
+          ]);
+        })),
+    ),
+  );
 }
 
 class ProcessingPage extends StatefulWidget {
