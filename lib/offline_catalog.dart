@@ -8,7 +8,8 @@ import 'models.dart';
 
 /// A local textbook package. No API calls are made while importing or searching.
 class OfflineCatalog {
-  static final RegExp _pageName = RegExp(r'^pages/[0-9]{3}\.jpg
+  static final RegExp _pageName = RegExp(r'^pages/[0-9]{3}\.jpg$');
+  static final RegExp _cropName = RegExp(r'^crops/[a-zA-Z0-9_-]+\.jpg$');
 
   static Future<BookRecord> install(
     String zipPath,
