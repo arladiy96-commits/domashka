@@ -8,6 +8,7 @@ import 'ai_service.dart';
 import 'models.dart';
 import 'store.dart';
 import 'offline_catalog.dart';
+import 'prepared_solution.dart';
 import 'structured_exercise_view.dart';
 
 const ink = Color(0xff142b50);
@@ -651,6 +652,14 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
   bool recognizing = false;
   bool hasSavedText = false;
 
+  /// Editing a task always disables its precomputed answer.
+  bool get canShowPrepared =>
+      widget.book?.isOffline == true &&
+      widget.printedPage != null &&
+      widget.offlineExercise?.preparedSolution != null &&
+      !hasSavedText &&
+      text.text.trim() == widget.exercise.text.trim();
+
   @override
   void initState() {
     super.initState();
@@ -691,6 +700,17 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
     final corrected = text.text.trim();
     if (corrected.isEmpty) { message(context, 'Введи условие.'); return; }
     if (recognizing) return;
+    if (canShowPrepared) {
+      final ready = widget.offlineExercise!.toPreparedResult(
+        widget.book!, widget.printedPage!);
+      if (ready != null) {
+        await widget.store.remember(ready);
+        if (!mounted) return;
+        Navigator.push(context, MaterialPageRoute(
+          builder: (_) => SolutionPage(result: ready)));
+        return;
+      }
+    }
     if (widget.book?.isOffline == true && widget.printedPage != null) {
       try {
         await widget.store.saveOfflineCorrection(
@@ -718,6 +738,17 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
       const SectionHead('Всё правильно?',
         subtitle: 'Перед решением проверь, что все числа и знаки точны'),
       const SizedBox(height: 15),
+      if (canShowPrepared) ...[
+        const Surface(color: Color(0xffe6f8f1),
+          child: Row(children: [
+            Icon(Icons.offline_bolt_rounded, color: Color(0xff11876e)),
+            SizedBox(width: 10),
+            Expanded(child: Text('Это задание уже решено и объяснено. '
+              'Схемы, правило и примеры откроются без интернета.',
+              style: TextStyle(color: Color(0xff0b6b56)))),
+          ])),
+        const SizedBox(height: 14),
+      ],
       if (widget.offlineExercise != null &&
           widget.book?.isOffline == true && widget.printedPage != null) ...[
         const Text('Оригинал задания (масштабируется двумя пальцами)',
@@ -776,7 +807,8 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
                 : 'Текст ещё не проверен; нужен полный ввод по оригиналу.',
             style: const TextStyle(color: muted, fontSize: 12)),
         const SizedBox(height: 13),
-        TextField(controller: text, maxLines: null, minLines: 5,
+        TextField(controller: text, onChanged: (_) => setState(() {}),
+          maxLines: null, minLines: 5,
           style: const TextStyle(color: ink, fontSize: 16, height: 1.5),
           decoration: const InputDecoration(hintText: 'Полное условие задания')),
       ])),
@@ -793,10 +825,14 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
       SizedBox(width: double.infinity, child: FilledButton.icon(
         onPressed: recognizing ? null : confirmAndSolve,
         icon: const Icon(Icons.auto_awesome),
-        label: const Text('Подтвердить и решить'))),
+        label: Text(canShowPrepared
+          ? 'Открыть готовое решение (офлайн)'
+          : 'Подтвердить и решить'))),
       const SizedBox(height: 12),
       Text(widget.offlineExercise != null
-        ? 'После подтверждения исправленный текст сохранится на телефоне. '
+        ? canShowPrepared
+          ? 'Готовое решение находится на телефоне: интернет и API не нужны.'
+          : 'После подтверждения исправленный текст сохранится на телефоне. '
           'Повторное распознавание этого задания не потребуется.'
         : 'Изображения и учебник не изменяются. Исправленный текст '
           'используется только для этого решения.',
@@ -928,6 +964,13 @@ class _SolutionPageState extends State<SolutionPage> {
               const SizedBox(width: 10), Expanded(child: Text(result.warning,
                 style: const TextStyle(color: Color(0xff80520b), fontSize: 13))),
             ])),
+        ],
+        if (result.solutionBlocks.isNotEmpty) ...[
+          const SizedBox(height: 15),
+          const SectionHead('Наглядное решение',
+            subtitle: 'Схемы и таблицы из подготовленного каталога'),
+          const SizedBox(height: 10),
+          PreparedSolutionView(blocks: result.solutionBlocks),
         ],
         const SizedBox(height: 20), SegmentedButton<int>(showSelectedIcon: false,
           style: SegmentedButton.styleFrom(selectedBackgroundColor: const Color(0xffdfeaff)),
