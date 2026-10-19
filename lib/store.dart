@@ -14,6 +14,7 @@ class AppStore extends ChangeNotifier {
   final _secure = const FlutterSecureStorage();
   final books = <BookRecord>[];
   final history = <StudyResult>[];
+  final offlineCorrections = <String, String>{};
   String geminiKey = '', groqKey = '';
   String geminiModel = GeminiModels.defaultModel, groqModel = GroqModels.defaultModel;
   bool checkWithGemini = true, busy = false;
@@ -33,6 +34,8 @@ class AppStore extends ChangeNotifier {
         books.removeWhere((b) => !File(b.path).existsSync());
         history.addAll(((data['history'] as List?) ?? []).whereType<Map>()
             .map((v) => StudyResult.fromJson(Map<String, dynamic>.from(v))));
+        offlineCorrections.addAll((data['offlineCorrections'] as Map? ?? {}).map(
+          (key, value) => MapEntry(key.toString(), value.toString())));
         geminiModel = GeminiModels.normalize((data['geminiModel'] ?? geminiModel).toString());
         if (geminiModel == 'gemini-2.5-flash' || geminiModel.isEmpty) {
           geminiModel = GeminiModels.defaultModel;
@@ -63,6 +66,7 @@ class AppStore extends ChangeNotifier {
     final json = const JsonEncoder.withIndent('  ').convert({
       'books': books.map((e) => e.toJson()).toList(),
       'history': history.map((e) => e.toJson()).toList(),
+      'offlineCorrections': offlineCorrections,
       'geminiModel': geminiModel, 'groqModel': groqModel,
       'checkWithGemini': checkWithGemini,
     });
@@ -154,8 +158,25 @@ class AppStore extends ChangeNotifier {
     BookRecord book, int page, String number,
   ) => OfflineCatalog.find(book, page, number);
 
+  String? offlineCorrection(BookRecord book, int page, String number) =>
+      offlineCorrections['${book.id}:$page:$number'];
+
+  /// Save text only after a person confirms it against the original.
+  Future<void> saveOfflineCorrection(
+      BookRecord book, int page, String number, String correctedText) async {
+    if (!book.isOffline) return;
+    final value = correctedText.trim();
+    if (value.isEmpty) return;
+    offlineCorrections['${book.id}:$page:$number'] = value;
+    await save();
+  }
+
   Future<void> deleteBook(BookRecord book) async {
-    books.remove(book); await save();
+    books.remove(book);
+    if (book.isOffline) {
+      offlineCorrections.removeWhere((key, value) => key.startsWith('${book.id}:'));
+    }
+    await save();
     if (book.isOffline) {
       final folder = Directory(book.offlineDirectory!);
       if (await folder.exists()) await folder.delete(recursive: true);
