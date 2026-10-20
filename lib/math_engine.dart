@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'offline_word_rules.dart';
 
 class MathAnswer {
   const MathAnswer(this.expression, this.value, this.notebook,
@@ -41,9 +42,60 @@ class MathEngine {
     }
     final found = _arithmetic.allMatches(text).toList();
     if (found.length != 1 || !RegExp(
-      r'^\s*(?:Вычисли[:.]?\s*)?\d{1,5}\s*[+\-−×*÷/:]\s*\d{1,5}\s*(?:=\s*\??|\?)?\s*$',
+      r'^\s*(?:Вычисли[:.]?\s*)?\d{1,5}\s*[+\-−×*÷/:]\s*\d{1,5}\s*(?:=\s*\??|\?)?\s*
+    final a = int.parse(found.single.group(1)!);
+    final b = int.parse(found.single.group(3)!);
+    final sign = _sign(found.single.group(2)!);
+    final value = calculate(a, b, sign);
+    if (value == null) return null;
+    final rule = switch (sign) {
+      '+' => 'Сложение помогает объединять части в целое.',
+      '−' => 'Вычитание помогает найти остаток или разницу.',
+      '×' => 'Умножение — это сложение одинаковых групп.',
+      _ => 'Деление помогает распределить предметы поровну.'
+    };
+    final tasks = <PracticeTask>[];
+    for (var i = 1; i <= 3; i++) {
+      var x = a + i * 2;
+      final y = b + i;
+      if (sign == '−' && x < y) x = y + i;
+      if (sign == '÷') x = y * (i + 2);
+      final answer = calculate(x, y, sign);
+      if (answer != null) tasks.add(PracticeTask('$x $sign $y = ?', '$answer'));
+    }
+    return MathAnswer('$a $sign $b', value,
+      '$a $sign $b = $value\nОтвет: $value.',
+      'Выполняем действие $a $sign $b. Получаем $value.', rule, tasks);
+  }
+
+  static String _sign(String value) => switch (value) {
+    '−' || '-' => '−', '*' || '×' => '×',
+    '/' || ':' || '÷' => '÷', _ => '+'
+  };
+
+  static int? calculate(int a, int b, String sign) {
+    switch (_sign(sign)) {
+      case '+': return a + b;
+      case '−': return a - b;
+      case '×': return a * b;
+      default:
+        if (b == 0 || a % b != 0) return null;
+        return a ~/ b;
+    }
+  }
+
+  static bool sameValue(MathAnswer expected, String actual) {
+    final match = RegExp(r'-?\d+').firstMatch(actual);
+    return match != null && int.tryParse(match.group(0)!) == expected.value;
+  }
+},
       caseSensitive: false,
-    ).hasMatch(text.trim())) return null;
+    ).hasMatch(text.trim())) {
+      final word = OfflineWordRules.solve(problem);
+      if (word == null) return null;
+      return MathAnswer(word.expression, word.value, word.notebook,
+          word.explanation, word.rule, word.practice);
+    }
     final a = int.parse(found.single.group(1)!);
     final b = int.parse(found.single.group(3)!);
     final sign = _sign(found.single.group(2)!);
