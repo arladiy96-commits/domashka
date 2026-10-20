@@ -19,3 +19,11 @@ else:
     text = text.replace("jcenter()", "mavenCentral()")
     target.write_text(text, encoding="utf-8")
     print("Patched removed jcenter() calls:", target)
+
+# Gradle 9/modern Kotlin defaults to JVM 17, while the plugin's Java
+# compile task defaults to 11. Both compilation targets must match.
+text = target.read_text(encoding="utf-8")
+if "sourceCompatibility JavaVersion.VERSION_17" not in text:
+    text += "\nandroid {\n  compileOptions {\n    sourceCompatibility JavaVersion.VERSION_17\n    targetCompatibility JavaVersion.VERSION_17\n  }\n}\n"
+    target.write_text(text, encoding="utf-8")
+    print("Aligned OCR plugin Java target with Kotlin JVM 17:", target)
