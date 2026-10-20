@@ -9,7 +9,10 @@ import os
 import tempfile
 
 TARGET = Path("assets/tessdata")
-BASE = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/"
+MODEL_BASE = "https://raw.githubusercontent.com/tesseract-ocr/"
+# High-accuracy Russian LSTM for worksheet characters; English retained
+# for compatibility but never mixed with Russian for the local card reader.
+LANG_REPOSITORIES = {"rus": "tessdata_best", "eng": "tessdata_fast"}
 
 def main():
     TARGET.mkdir(parents=True, exist_ok=True)
@@ -19,7 +22,8 @@ def main():
             print("Already present:", destination, destination.stat().st_size)
             continue
         print("Bundling OCR model:", language, flush=True)
-        request = Request(BASE + language + ".traineddata", headers={
+        request = Request(MODEL_BASE + LANG_REPOSITORIES[language] +
+                          "/main/" + language + ".traineddata", headers={
             "User-Agent": "domashka-android-build/1.0",
         })
         descriptor, temporary = tempfile.mkstemp(dir=TARGET, prefix=".download_")
