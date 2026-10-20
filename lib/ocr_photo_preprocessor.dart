@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 
 /// Fast, conservative preprocessing for photographs of printed worksheets.
@@ -112,7 +113,7 @@ class OcrPhotoPreprocessor {
         contrast: 1.35, brightness: 1.03);
   }
 
-  static img.Image decodePage(List<int> bytes) {
+  static img.Image decodePage(Uint8List bytes) {
     final raw = img.decodeImage(bytes);
     if (raw == null) throw StateError('Не удалось открыть снимок карточки.');
     return cropPaper(normalize(raw));
