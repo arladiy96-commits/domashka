@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:image/image.dart' as img;
+import 'auto_document_scan.dart';
 
 /// Fast, conservative preprocessing for photographs of printed worksheets.
 /// This never rewrites recognized digits or mathematical signs.
@@ -116,7 +117,11 @@ class OcrPhotoPreprocessor {
   static img.Image decodePage(Uint8List bytes) {
     final raw = img.decodeImage(bytes);
     if (raw == null) throw StateError('Не удалось открыть снимок карточки.');
-    return cropPaper(normalize(raw));
+    final photo = normalize(raw);
+    // Automatic, invisible document scanning: detect sheet, straighten
+    // perspective and discard tabletop. Conservative cropPaper fallback
+    // retains the photograph if no safe four-corner scan is available.
+    return AutoDocumentScan.rectify(photo) ?? cropPaper(photo);
   }
 
   static List<img.Image> splitColumns(img.Image image) {
