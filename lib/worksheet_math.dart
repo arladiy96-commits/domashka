@@ -115,7 +115,7 @@ class WorksheetUnitMath {
     final raw = line.trim();
     final text = _clean(raw);
     // Comparisons use printed dots (or an existing inequality symbol).
-    final comparison = _comparison.firstMatch(text);
+    final comparison = text.contains('=') ? null : _comparison.firstMatch(text);
     if (comparison != null) {
       final left = _read(comparison.group(1)!);
       final right = _read(comparison.group(2)!);
