@@ -23,10 +23,22 @@ void main() {
     expect(tasks[0].text, contains('15 девочек'));
   });
 
-  test('Общий заголовок остаётся на карточке', () {
+  test('Общий заголовок остаётся отдельным, задания не склеиваются', () {
     final tasks = OfflineCardParser.split('Вариант 1\n1. 20 + 30 = ?\n2. 50 − 15 = ?');
-    expect(tasks.length, 1);
+    expect(tasks.length, 3);
+    expect(tasks[0].number, 'инструкция');
     expect(tasks[0].text, contains('Вариант 1'));
+    expect(tasks[1].number, '1');
+    expect(tasks[2].number, '2');
+  });
+
+  test('Определяем случайно склеенные два столбца', () {
+    expect(OfflineCardOcr.looksLikeTwoColumns(
+      '80 см...8дм 5 см 1м...7дм\n'
+      '1 ц...10 кг 43л...34л\n'
+      '19 кг+81 кг=1м-3дм='), isTrue);
+    expect(OfflineCardOcr.looksLikeTwoColumns(
+      'В коробке было 24 яблока.\nДобавили ещё 16.\nСколько всего?'), isFalse);
   });
 
   test('Строки одного задания не разбиваются', () {

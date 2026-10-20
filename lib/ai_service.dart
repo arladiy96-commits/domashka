@@ -7,6 +7,7 @@ import 'package:image/image.dart' as img;
 import 'package:pdfrx/pdfrx.dart';
 import 'models.dart';
 import 'math_engine.dart';
+import 'worksheet_math.dart';
 import 'gemini_models.dart';
 import 'groq_models.dart';
 import 'store.dart';
@@ -337,6 +338,28 @@ class AiService {
   Future<StudyResult> solve(String problem, {String source = 'Вручную',
       String? bookId, int? page, String? number,
       bool offlineOnly = false}) async {
+    if (offlineOnly) {
+      final batch = WorksheetBatch.solve(problem);
+      if (batch != null) {
+        return StudyResult(
+          id: 'worksheet-' + DateTime.now().microsecondsSinceEpoch.toString(),
+          problem: problem,
+          answer: batch.answer,
+          notebook: batch.notebook,
+          explanation: batch.explanation,
+          rule: '1 м = 10 дм = 100 см; 1 ц = 100 кг. '
+              'Сравнивай и вычисляй только величины одного вида.',
+          source: source + ' · локальная проверка величин',
+          createdAt: DateTime.now().toIso8601String(),
+          bookId: bookId, page: page, number: number,
+          verified: batch.complete,
+          warning: batch.complete ? '' :
+            'Не все строки удалось распознать однозначно. '
+            'Нерешённые строки перечислены в конце решения. '
+            'Сверь их с фотографией и исправь, прежде чем переписывать ответ.',
+        );
+      }
+    }
     final engine = MathEngine.solve(problem);
     // A deterministic result takes precedence over Groq/Gemini even when
     // API keys are configured. The answer must not be overwritten by AI.
