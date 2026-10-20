@@ -27,3 +27,14 @@ if "sourceCompatibility JavaVersion.VERSION_17" not in text:
     text += "\nandroid {\n  compileOptions {\n    sourceCompatibility JavaVersion.VERSION_17\n    targetCompatibility JavaVersion.VERSION_17\n  }\n}\n"
     target.write_text(text, encoding="utf-8")
     print("Aligned OCR plugin Java target with Kotlin JVM 17:", target)
+
+# Upstream 0.5.0 ships two Flutter plugin classes with the same
+# package and name: one real Java OCR implementation and a nonfunctional
+# Kotlin scaffold. Remove only the scaffold during the CI build.
+scaffold = target.parent / "src" / "main" / "kotlin" / "io" / "paratoner" / "tesseract_ocr" / "TesseractOcrPlugin.kt"
+if scaffold.exists():
+    contents = scaffold.read_text(encoding="utf-8")
+    if "getPlatformVersion" not in contents or "extractText" in contents:
+        raise SystemExit("Unexpected Kotlin plugin implementation; refusing to delete " + str(scaffold))
+    scaffold.unlink()
+    print("Removed duplicate nonfunctional Kotlin plugin scaffold:", scaffold)
