@@ -147,8 +147,8 @@ class AutoDocumentScan {
     final cx = corners.map((p) => p.x).reduce((a, b) => a + b) / 4;
     final cy = corners.map((p) => p.y).reduce((a, b) => a + b) / 4;
     final expanded = corners.map((p) => _Point(
-      (cx + (p.x - cx) * 1.023).clamp(0, photo.width - 1),
-      (cy + (p.y - cy) * 1.023).clamp(0, photo.height - 1),
+      (cx + (p.x - cx) * 1.023).clamp(0, photo.width - 1).toDouble(),
+      (cy + (p.y - cy) * 1.023).clamp(0, photo.height - 1).toDouble(),
     )).toList();
 
     final outputWidth = math.max(_distance(expanded[0], expanded[1]),
