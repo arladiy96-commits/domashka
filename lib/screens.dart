@@ -601,6 +601,19 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
     read();
   }
 
+  void enterManually() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ConfirmExercisePage(
+      store: widget.store,
+      exercise: const Exercise('карточка', ''),
+      offlineOnly: mode == PhotoReadMode.offline,
+      uncertain: true,
+      source: mode == PhotoReadMode.offline
+          ? 'Карточка · ручная проверка офлайн'
+          : 'Карточка · ручной ввод',
+      sourceImage: widget.image,
+    )));
+  }
+
   @override
   Widget build(BuildContext context) {
     final isOffline = mode == PhotoReadMode.offline;
@@ -647,13 +660,13 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
             Text(error!, textAlign: TextAlign.center),
             const SizedBox(height: 12),
             FilledButton(onPressed: read, child: const Text('Повторить')),
-            TextButton(onPressed: () => openManual(context, widget.store),
+            TextButton(onPressed: enterManually,
               child: const Text('Ввести условие вручную')),
           ]))
         else if (exercises.isEmpty)
           Surface(child: Column(children: [
             const Text('На снимке не получилось выделить текст.'),
-            TextButton(onPressed: () => openManual(context, widget.store),
+            TextButton(onPressed: enterManually,
               child: const Text('Ввести вручную')),
           ]))
         else Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -673,6 +686,7 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
                 builder: (_) => ConfirmExercisePage(
                   store: widget.store, exercise: task,
                   offlineOnly: isOffline, uncertain: isOffline,
+                  sourceImage: widget.image,
                   source: isOffline
                       ? 'Карточка · локальное распознавание'
                       : 'Карточка · Gemini',
@@ -686,6 +700,7 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
                 store: widget.store,
                 exercises: exercises,
                 offlineOnly: isOffline,
+                sourceImage: widget.image,
                 source: isOffline
                     ? 'Карточка · локальное распознавание'
                     : 'Карточка · Gemini',
@@ -702,8 +717,9 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
 class ExerciseSelectionPage extends StatelessWidget {
   const ExerciseSelectionPage({super.key, required this.store, required this.exercises,
     required this.source, this.bookId, this.printedPage,
-    this.offlineOnly = false});
+    this.offlineOnly = false, this.sourceImage});
   final bool offlineOnly;
+  final Uint8List? sourceImage;
   final AppStore store;
   final List<Exercise> exercises;
   final String source;
@@ -718,7 +734,7 @@ class ExerciseSelectionPage extends StatelessWidget {
         child: InkWell(onTap: () => Navigator.push(context, MaterialPageRoute(
           builder: (_) => ConfirmExercisePage(store: store, exercise: e,
             bookId: bookId, printedPage: printedPage, source: source,
-            offlineOnly: offlineOnly))),
+            offlineOnly: offlineOnly, sourceImage: sourceImage))),
           child: Surface(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
             children: [Text('Задание ${e.number}', style: const TextStyle(color: accent,
               fontWeight: FontWeight.w800)), const SizedBox(height: 10), Text(e.text,
@@ -730,7 +746,8 @@ class ConfirmExercisePage extends StatefulWidget {
   const ConfirmExercisePage({super.key, required this.store, required this.exercise,
     this.book, this.bookId, this.printedPage, this.source,
     this.offlineExercise, this.uncertain = false,
-    this.offlineOnly = false});
+    this.offlineOnly = false, this.sourceImage});
+  final Uint8List? sourceImage;
   final AppStore store;
   final Exercise exercise;
   final BookRecord? book;
@@ -833,6 +850,16 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
       const SectionHead('Всё правильно?',
         subtitle: 'Перед решением проверь, что все числа и знаки точны'),
       const SizedBox(height: 15),
+      if (widget.sourceImage != null) ...[
+        const Text('Оригинал карточки', style: TextStyle(
+          color: ink, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        ClipRRect(borderRadius: BorderRadius.circular(12),
+          child: InteractiveViewer(minScale: 1, maxScale: 5,
+            child: Image.memory(widget.sourceImage!, height: 250,
+              fit: BoxFit.contain))),
+        const SizedBox(height: 14),
+      ],
       if (canShowPrepared) ...[
         const Surface(color: Color(0xffe6f8f1),
           child: Row(children: [
