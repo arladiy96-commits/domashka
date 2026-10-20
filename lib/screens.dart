@@ -570,6 +570,8 @@ class ReadingImagePage extends StatefulWidget {
 
 class _ReadingImagePageState extends State<ReadingImagePage> {
   PhotoReadMode mode = PhotoReadMode.offline;
+  bool twoColumns = false;
+  bool layoutChosenManually = false;
   bool loading = true;
   String? error;
   List<Exercise> exercises = [];
@@ -584,10 +586,21 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
     final requested = mode;
     setState(() { loading = true; error = null; exercises = []; });
     try {
-      final found = requested == PhotoReadMode.offline
-          ? OfflineCardParser.split(await OfflineCardOcr.recognize(widget.image))
-          : await AiService(widget.store).readImage(widget.image);
-      if (mounted && requested == mode) setState(() => exercises = found);
+      late final List<Exercise> found;
+      if (requested == PhotoReadMode.offline) {
+        final fullText = await OfflineCardOcr.recognize(widget.image);
+        final chosenColumns = layoutChosenManually ? twoColumns :
+            OfflineCardOcr.looksLikeTwoColumns(fullText);
+        found = chosenColumns
+            ? await OfflineCardOcr.recognizeColumns(widget.image)
+            : OfflineCardParser.split(fullText);
+        if (mounted && requested == mode) {
+          setState(() { exercises = found; twoColumns = chosenColumns; });
+        }
+      } else {
+        found = await AiService(widget.store).readImage(widget.image);
+        if (mounted && requested == mode) setState(() => exercises = found);
+      }
     } catch (e) {
       if (mounted && requested == mode) setState(() => error = e.toString());
     } finally {
@@ -635,6 +648,23 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
           selected: {mode},
           onSelectionChanged: loading ? null : (selected) => choose(selected.first),
         ),
+        if (isOffline) ...[
+          const SizedBox(height: 9),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Карточка в два столбца',
+              style: TextStyle(color: ink, fontWeight: FontWeight.w700)),
+            subtitle: const Text('Распознавать левую и правую колонки отдельно'),
+            value: twoColumns,
+            onChanged: loading ? null : (value) {
+              setState(() {
+                twoColumns = value;
+                layoutChosenManually = true;
+              });
+              read();
+            },
+          ),
+        ],
         const SizedBox(height: 12),
         Surface(color: isOffline ? const Color(0xffe6f8f1) : const Color(0xffeaf3ff),
           child: Text(isOffline
@@ -694,6 +724,24 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
               )),
             ),
           )),
+          if (isOffline) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => ConfirmExercisePage(
+                  store: widget.store,
+                  exercise: Exercise('вся карточка',
+                    exercises.map((task) => task.text).join('\n')),
+                  offlineOnly: true,
+                  sourceImage: widget.image,
+                  uncertain: true,
+                  source: 'Карточка · все распознанные пункты офлайн',
+                ))),
+              icon: const Icon(Icons.rule_rounded),
+              label: const Text('Проверить и решить все пункты'),
+            ),
+            const SizedBox(height: 12),
+          ],
           FilledButton.icon(
             onPressed: () => Navigator.push(context, MaterialPageRoute(
               builder: (_) => ExerciseSelectionPage(
