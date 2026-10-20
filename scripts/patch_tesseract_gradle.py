@@ -38,3 +38,19 @@ if scaffold.exists():
         raise SystemExit("Unexpected Kotlin plugin implementation; refusing to delete " + str(scaffold))
     scaffold.unlink()
     print("Removed duplicate nonfunctional Kotlin plugin scaffold:", scaffold)
+
+# For separately isolated worksheet columns, Tesseract's default
+# multi-column layout analysis can rejoin different math lines. The legacy
+# Java plugin hard-codes PSM_AUTO and ignores Dart OCRConfig options, so
+# configure a single coherent printed text block at build time.
+java = target.parent / "src" / "main" / "java" / "io" / "paratoner" / "tesseract_ocr" / "TesseractOcrPlugin.java"
+if not java.exists():
+    raise SystemExit("OCR Java implementation not found: " + str(java))
+source = java.read_text(encoding="utf-8")
+current = "baseApi.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO);"
+updated = "baseApi.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK);"
+if current in source:
+    java.write_text(source.replace(current, updated), encoding="utf-8")
+    print("Tesseract page segmentation set to single block.")
+elif updated not in source:
+    raise SystemExit("Unexpected Tesseract page-segmentation implementation.")
