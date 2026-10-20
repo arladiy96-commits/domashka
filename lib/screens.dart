@@ -249,7 +249,7 @@ Future<void> openPhotoChoice(BuildContext context, AppStore store) async {
   if (source == null || !context.mounted) return;
   try {
     final image = await ImagePicker().pickImage(source: source,
-      maxWidth: 1800, imageQuality: 86);
+      maxWidth: 3200, imageQuality: 98);
     if (image == null || !context.mounted) return;
     final bytes = await image.readAsBytes();
     if (!context.mounted) return;
@@ -588,12 +588,21 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
     try {
       late final List<Exercise> found;
       if (requested == PhotoReadMode.offline) {
-        final fullText = await OfflineCardOcr.recognize(widget.image);
-        final chosenColumns = layoutChosenManually ? twoColumns :
-            OfflineCardOcr.looksLikeTwoColumns(fullText);
-        found = chosenColumns
-            ? await OfflineCardOcr.recognizeColumns(widget.image)
-            : OfflineCardParser.split(fullText);
+        // Skip the slow full-page OCR when user has explicitly chosen
+        // two columns. Only detect layout automatically when necessary.
+        if (layoutChosenManually && twoColumns) {
+          found = await OfflineCardOcr.recognizeColumns(widget.image);
+        } else {
+          final fullText = await OfflineCardOcr.recognize(widget.image);
+          final chosenColumns = layoutChosenManually ? twoColumns :
+              OfflineCardOcr.looksLikeTwoColumns(fullText);
+          found = chosenColumns
+              ? await OfflineCardOcr.recognizeColumns(widget.image)
+              : OfflineCardParser.split(fullText);
+          if (mounted && requested == mode) {
+            setState(() => twoColumns = chosenColumns);
+          }
+        }
         if (mounted && requested == mode) {
           setState(() { exercises = found; twoColumns = chosenColumns; });
         }
