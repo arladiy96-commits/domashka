@@ -28,6 +28,8 @@ jobs:
         run: python3 scripts/fetch_ocr_models.py
       - name: Install Flutter dependencies
         run: flutter pub get
+      - name: Patch legacy OCR Gradle repositories
+        run: python3 scripts/patch_tesseract_gradle.py
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
       - name: Run tests
