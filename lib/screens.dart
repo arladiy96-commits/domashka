@@ -604,7 +604,7 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
           }
         }
         if (mounted && requested == mode) {
-          setState(() { exercises = found; twoColumns = chosenColumns; });
+          setState(() => exercises = found);
         }
       } else {
         found = await AiService(widget.store).readImage(widget.image);
