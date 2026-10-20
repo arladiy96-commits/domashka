@@ -6,69 +6,62 @@ import 'package:image/image.dart' as img;
 import 'package:tesseract_ocr/tesseract_ocr.dart';
 import 'package:tesseract_ocr/ocr_engine_config.dart';
 import 'models.dart';
+import 'ocr_photo_preprocessor.dart';
 
 /// Runs locally. Model files ship inside the APK (downloaded only at build).
 class OfflineCardOcr {
-  static Future<String> recognize(Uint8List bytes) async {
-    if (bytes.isEmpty) throw StateError('Изображение пустое.');
+  static Future<String> recognize(Uint8List bytes) =>
+      _recognizePrepared(OcrPhotoPreprocessor.improve(
+        OcrPhotoPreprocessor.decodePage(bytes)));
+
+  static Future<String> _recognizePrepared(img.Image prepared) async {
     final directory = await getTemporaryDirectory();
     final path = directory.path + '/domashka_ocr_' +
-        DateTime.now().microsecondsSinceEpoch.toString() + '.jpg';
+        DateTime.now().microsecondsSinceEpoch.toString() + '.png';
     final file = File(path);
     try {
-      await file.writeAsBytes(bytes, flush: true);
-      final text = await TesseractOcr.extractText(path,
+      // Lossless PNG preserves punctuation and thin strokes.
+      await file.writeAsBytes(img.encodePng(prepared), flush: true);
+      final result = await TesseractOcr.extractText(path,
         config: OCRConfig(
-          language: 'rus+eng',
+          // English training creates spurious Latin fragments (e.g. TSN oil).
+          // Cyrillic Tesseract also recognizes Arabic numerals.
+          language: 'rus',
           engine: OCREngine.tesseract,
           options: {
             'preserve_interword_spaces': '1',
-            'tessedit_pageseg_mode': '3',
+            'tessedit_pageseg_mode': '6',
           },
         ),
       );
-      if (text.trim().isEmpty) {
-        throw StateError('Не удалось разобрать текст. Сними карточку ближе и без бликов.');
+      if (result.trim().isEmpty) {
+        throw StateError('Русский OCR не смог прочитать карточку. '
+            'Сними лист крупнее без бликов или исправь текст вручную.');
       }
-      return text;
+      return result;
     } finally {
       if (await file.exists()) await file.delete();
     }
   }
 
-  /// Two narrow columns must not be passed to OCR as a single text stream:
-  /// Tesseract often joins adjacent lines and corrupts mathematical units.
-  /// Split the original bitmap before OCR so each column is independent.
-  static Future<List<Exercise>> recognizeColumns(Uint8List imageBytes) async {
-    final photo = img.decodeImage(imageBytes);
-    if (photo == null) throw StateError('Не удалось открыть фотографию.');
-    final middle = photo.width ~/ 2;
-    if (middle < 120 || photo.height < 180) {
-      throw StateError('Снимок слишком маленький для двух столбцов.');
-    }
-    final margin = (photo.width * 0.005).round();
-    final left = img.copyCrop(photo, x: 0, y: 0,
-        width: middle + margin, height: photo.height);
-    final right = img.copyCrop(photo, x: middle - margin, y: 0,
-        width: photo.width - middle + margin, height: photo.height);
+  /// Read full paper first, then split its two printed columns.
+  /// Cropping the *entire original photo* in half can keep too much table
+  /// background and leave each 8pt glyph unreadably small.
+  static Future<List<Exercise>> recognizeColumns(Uint8List bytes) async {
+    final page = OcrPhotoPreprocessor.decodePage(bytes);
+    final columns = OcrPhotoPreprocessor.splitColumns(page);
     final tasks = <Exercise>[];
-    for (final item in [
-      ('левый столбец', left),
-      ('правый столбец', right),
-    ]) {
+    for (var i = 0; i < columns.length; i++) {
+      final name = i == 0 ? 'левый столбец' : 'правый столбец';
       try {
-        final bytes = Uint8List.fromList(img.encodeJpg(item.$2, quality: 95));
-        final text = await recognize(bytes);
-        if (text.trim().isNotEmpty) {
-          tasks.add(Exercise(item.$1, text.trim()));
-        }
-      } catch (_) {
-        // Other column is still useful; never substitute invented OCR text.
+        final result = await _recognizePrepared(
+          OcrPhotoPreprocessor.improve(columns[i]));
+        tasks.add(Exercise(name, result.trim()));
+      } catch (error) {
+        // A missing column must remain visible, never disappear silently.
+        tasks.add(Exercise(name, 'Не удалось распознать этот столбец. '
+            'Сверь с фотографией и введи задания вручную.'));
       }
-    }
-    if (tasks.isEmpty) {
-      throw StateError('Не удалось разобрать ни один столбец. '
-          'Попробуй снять карточку ближе, ровнее и при хорошем освещении.');
     }
     return tasks;
   }
