@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
 import 'package:image/image.dart' as img;
+import 'package:flutter/foundation.dart';
 import 'package:tesseract_ocr/tesseract_ocr.dart';
 import 'package:tesseract_ocr/ocr_engine_config.dart';
 import 'models.dart';
@@ -10,22 +11,22 @@ import 'ocr_photo_preprocessor.dart';
 
 /// Runs locally. Model files ship inside the APK (downloaded only at build).
 class OfflineCardOcr {
-  static Future<String> recognize(Uint8List bytes) =>
-      _recognizePrepared(OcrPhotoPreprocessor.improve(
-        OcrPhotoPreprocessor.decodePage(bytes)));
+  /// Scanning, perspective correction and image enhancement run in a
+  /// background isolate so large phone photos never freeze the screen.
+  static Future<String> recognize(Uint8List bytes) async {
+    final prepared = await compute(_prepareFullPage, bytes);
+    return _recognizePrepared(prepared);
+  }
 
-  static Future<String> _recognizePrepared(img.Image prepared) async {
+  static Future<String> _recognizePrepared(Uint8List preparedPng) async {
     final directory = await getTemporaryDirectory();
     final path = directory.path + '/domashka_ocr_' +
         DateTime.now().microsecondsSinceEpoch.toString() + '.png';
     final file = File(path);
     try {
-      // Lossless PNG preserves punctuation and thin strokes.
-      await file.writeAsBytes(img.encodePng(prepared), flush: true);
+      await file.writeAsBytes(preparedPng, flush: true);
       final result = await TesseractOcr.extractText(path,
         config: OCRConfig(
-          // English training creates spurious Latin fragments (e.g. TSN oil).
-          // Cyrillic Tesseract also recognizes Arabic numerals.
           language: 'rus',
           engine: OCREngine.tesseract,
           options: {
@@ -35,8 +36,8 @@ class OfflineCardOcr {
         ),
       );
       if (result.trim().isEmpty) {
-        throw StateError('Русский OCR не смог прочитать карточку. '
-            'Сними лист крупнее без бликов или исправь текст вручную.');
+        throw StateError('Не удалось прочитать карточку. '
+            'Попробуй снять лист ровнее, ближе и без бликов.');
       }
       return result;
     } finally {
@@ -44,21 +45,16 @@ class OfflineCardOcr {
     }
   }
 
-  /// Read full paper first, then split its two printed columns.
-  /// Cropping the *entire original photo* in half can keep too much table
-  /// background and leave each 8pt glyph unreadably small.
   static Future<List<Exercise>> recognizeColumns(Uint8List bytes) async {
-    final page = OcrPhotoPreprocessor.decodePage(bytes);
-    final columns = OcrPhotoPreprocessor.splitColumns(page);
+    final columns = await compute(_preparePageColumns, bytes);
     final tasks = <Exercise>[];
     for (var i = 0; i < columns.length; i++) {
       final name = i == 0 ? 'левый столбец' : 'правый столбец';
       try {
-        final result = await _recognizePrepared(
-          OcrPhotoPreprocessor.improve(columns[i]));
+        final result = await _recognizePrepared(columns[i]);
         tasks.add(Exercise(name, result.trim()));
-      } catch (error) {
-        // A missing column must remain visible, never disappear silently.
+      } catch (_) {
+        // Never silently omit part of a student's worksheet.
         tasks.add(Exercise(name, 'Не удалось распознать этот столбец. '
             'Сверь с фотографией и введи задания вручную.'));
       }
@@ -127,4 +123,20 @@ class OfflineCardParser {
     }
     return tasks;
   }
+}
+
+
+/// Pure, transferable image operations invoked by Flutter's compute().
+Uint8List _prepareFullPage(Uint8List original) {
+  final page = OcrPhotoPreprocessor.decodePage(original);
+  return Uint8List.fromList(
+      img.encodePng(OcrPhotoPreprocessor.improve(page)));
+}
+
+List<Uint8List> _preparePageColumns(Uint8List original) {
+  final page = OcrPhotoPreprocessor.decodePage(original);
+  return OcrPhotoPreprocessor.splitColumns(page)
+      .map((column) => Uint8List.fromList(
+          img.encodePng(OcrPhotoPreprocessor.improve(column))))
+      .toList();
 }
