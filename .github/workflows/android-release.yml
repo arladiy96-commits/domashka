@@ -24,6 +24,8 @@ jobs:
           flutter create --org kz.domashka --project-name domashka --platforms android --no-pub .
           python3 scripts/configure_android.py
           rm -f test/widget_test.dart
+      - name: Bundle local Russian-English OCR models
+        run: python3 scripts/fetch_ocr_models.py
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Generate launcher icons
