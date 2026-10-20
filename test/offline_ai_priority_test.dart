@@ -16,4 +16,18 @@ void main() {
     expect(result.source, contains('автономный'));
     expect(result.notebook, contains('24 + 16 = 40'));
   });
+  test('Офлайн-карточка без подходящего правила не отправляется в облако', () async {
+    final store = AppStore();
+    store.groqKey = 'invalid-test-token';
+    store.geminiKey = 'invalid-test-token';
+    await expectLater(
+      AiService(store).solve(
+        'На рисунке изображены три неизвестные фигуры. Найди их площадь.',
+        source: 'Карточка',
+        offlineOnly: true,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
 }

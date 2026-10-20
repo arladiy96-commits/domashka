@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'ai_service.dart';
+import 'offline_card_ocr.dart';
 import 'models.dart';
 import 'store.dart';
 import 'offline_catalog.dart';
@@ -257,9 +258,11 @@ Future<void> openPhotoChoice(BuildContext context, AppStore store) async {
 }
 
 Future<void> startSolve(BuildContext context, AppStore store, String text, {
-  required String source, String? bookId, int? page, String? number}) async {
+  required String source, String? bookId, int? page, String? number,
+  bool offlineOnly = false}) async {
   Navigator.push(context, MaterialPageRoute(builder: (_) => ProcessingPage(
-    store: store, text: text, source: source, bookId: bookId, page: page, number: number)));
+    store: store, text: text, source: source, bookId: bookId, page: page,
+    number: number, offlineOnly: offlineOnly)));
 }
 
 class LibraryPage extends StatefulWidget {
@@ -555,6 +558,8 @@ String? extractExercise(String text, String number) {
   return selection.trim().length > 550 ? selection.trim().substring(0, 550) : selection.trim();
 }
 
+enum PhotoReadMode { offline, gemini }
+
 class ReadingImagePage extends StatefulWidget {
   const ReadingImagePage({super.key, required this.store, required this.image});
   final AppStore store;
@@ -562,56 +567,159 @@ class ReadingImagePage extends StatefulWidget {
   @override
   State<ReadingImagePage> createState() => _ReadingImagePageState();
 }
+
 class _ReadingImagePageState extends State<ReadingImagePage> {
+  PhotoReadMode mode = PhotoReadMode.offline;
   bool loading = true;
   String? error;
   List<Exercise> exercises = [];
+
   @override
-  void initState() { super.initState(); WidgetsBinding.instance.addPostFrameCallback((_) => read()); }
-  Future<void> read() async {
-    setState(() { loading = true; error = null; });
-    try { final found = await AiService(widget.store).readImage(widget.image);
-      if (mounted) setState(() => exercises = found);
-    } catch (e) { if (mounted) setState(() => error = '$e'); }
-    finally { if (mounted) setState(() => loading = false); }
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => read());
   }
+
+  Future<void> read() async {
+    final requested = mode;
+    setState(() { loading = true; error = null; exercises = []; });
+    try {
+      final found = requested == PhotoReadMode.offline
+          ? OfflineCardParser.split(await OfflineCardOcr.recognize(widget.image))
+          : await AiService(widget.store).readImage(widget.image);
+      if (mounted && requested == mode) setState(() => exercises = found);
+    } catch (e) {
+      if (mounted && requested == mode) setState(() => error = e.toString());
+    } finally {
+      if (mounted && requested == mode) setState(() => loading = false);
+    }
+  }
+
+  void choose(PhotoReadMode value) {
+    if (mode == value || loading) return;
+    setState(() => mode = value);
+    read();
+  }
+
+  void enterManually() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ConfirmExercisePage(
+      store: widget.store,
+      exercise: const Exercise('карточка', ''),
+      offlineOnly: mode == PhotoReadMode.offline,
+      uncertain: true,
+      source: mode == PhotoReadMode.offline
+          ? 'Карточка · ручная проверка офлайн'
+          : 'Карточка · ручной ввод',
+      sourceImage: widget.image,
+    )));
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Фото задания')),
-    body: ListView(padding: const EdgeInsets.all(20), children: [
-      ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.memory(widget.image,
-        height: 200, fit: BoxFit.cover)),
-      const SizedBox(height: 20),
-      if (loading) const Surface(child: Column(children: [
-        CircularProgressIndicator(), SizedBox(height: 14),
-        Text('Gemini читает карточку...'),
-      ])) else if (error != null) Surface(child: Column(children: [
-        const Icon(Icons.wifi_off_rounded, color: accent, size: 42),
-        const SizedBox(height: 10), Text(error!),
-        const SizedBox(height: 14), FilledButton(onPressed: read,
-          child: const Text('Повторить')),
-      ])) else if (exercises.isEmpty) const Surface(child: Text('Упражнения на фотографии не найдены.'))
-      else Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        SectionHead('Прочитано: ${exercises.length} заданий',
-          subtitle: 'Проверь распознанный текст перед решением'),
-        const SizedBox(height: 13),
-        ...exercises.map((task) => Padding(padding: const EdgeInsets.only(bottom: 11),
-          child: ActionTile(icon: Icons.checklist_rounded, iconColor: accent,
-            tint: const Color(0xffeaf3ff), title: 'Задание ${task.number}',
-            subtitle: task.text,
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) =>
-              ConfirmExercisePage(store: widget.store, exercise: task)))))),
-        FilledButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(
-          builder: (_) => ExerciseSelectionPage(store: widget.store, exercises: exercises,
-            source: 'Карточка'))), icon: const Icon(Icons.auto_awesome),
-          label: const Text('Посмотреть все задания')),
+  Widget build(BuildContext context) {
+    final isOffline = mode == PhotoReadMode.offline;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Фото задания')),
+      body: ListView(padding: const EdgeInsets.all(20), children: [
+        ClipRRect(borderRadius: BorderRadius.circular(20),
+          child: InteractiveViewer(minScale: 1, maxScale: 5,
+            child: Image.memory(widget.image, height: 230, fit: BoxFit.contain))),
+        const SizedBox(height: 16),
+        SegmentedButton<PhotoReadMode>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: PhotoReadMode.offline,
+              icon: Icon(Icons.offline_bolt_rounded), label: Text('Офлайн')),
+            ButtonSegment(value: PhotoReadMode.gemini,
+              icon: Icon(Icons.cloud_outlined), label: Text('Gemini')),
+          ],
+          selected: {mode},
+          onSelectionChanged: loading ? null : (selected) => choose(selected.first),
+        ),
+        const SizedBox(height: 12),
+        Surface(color: isOffline ? const Color(0xffe6f8f1) : const Color(0xffeaf3ff),
+          child: Text(isOffline
+            ? 'Изображение обрабатывается только на телефоне. '
+              'Автоматических обращений к Gemini или Groq не будет. '
+              'Сверь цифры, знаки и таблицы с фотографией.'
+            : 'Только после выбора Gemini изображение отправляется в облако. '
+              'Сверь результат с оригиналом.',
+            style: TextStyle(
+              color: isOffline ? const Color(0xff0b6b56) : ink,
+              fontSize: 13, height: 1.4))),
+        const SizedBox(height: 18),
+        if (loading)
+          Surface(child: Column(children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 14),
+            Text(isOffline ? 'Распознаём на телефоне...' : 'Gemini читает карточку...'),
+          ]))
+        else if (error != null)
+          Surface(child: Column(children: [
+            const Icon(Icons.report_problem_outlined, color: accent, size: 42),
+            const SizedBox(height: 10),
+            Text(error!, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: read, child: const Text('Повторить')),
+            TextButton(onPressed: enterManually,
+              child: const Text('Ввести условие вручную')),
+          ]))
+        else if (exercises.isEmpty)
+          Surface(child: Column(children: [
+            const Text('На снимке не получилось выделить текст.'),
+            TextButton(onPressed: enterManually,
+              child: const Text('Ввести вручную')),
+          ]))
+        else Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SectionHead('Прочитано: ' + exercises.length.toString() + ' заданий',
+            subtitle: isOffline
+              ? 'Черновое распознавание. Исправь ошибки перед решением.'
+              : 'Проверь распознанный текст перед решением'),
+          const SizedBox(height: 13),
+          ...exercises.map((task) => Padding(
+            padding: const EdgeInsets.only(bottom: 11),
+            child: ActionTile(
+              icon: Icons.checklist_rounded, iconColor: accent,
+              tint: const Color(0xffeaf3ff),
+              title: 'Задание ' + task.number,
+              subtitle: task.text,
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => ConfirmExercisePage(
+                  store: widget.store, exercise: task,
+                  offlineOnly: isOffline, uncertain: isOffline,
+                  sourceImage: widget.image,
+                  source: isOffline
+                      ? 'Карточка · локальное распознавание'
+                      : 'Карточка · Gemini',
+                ),
+              )),
+            ),
+          )),
+          FilledButton.icon(
+            onPressed: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => ExerciseSelectionPage(
+                store: widget.store,
+                exercises: exercises,
+                offlineOnly: isOffline,
+                sourceImage: widget.image,
+                source: isOffline
+                    ? 'Карточка · локальное распознавание'
+                    : 'Карточка · Gemini',
+              ))),
+            icon: const Icon(Icons.list_alt_rounded),
+            label: const Text('Посмотреть все задания'),
+          ),
+        ]),
       ]),
-    ]));
+    );
+  }
 }
 
 class ExerciseSelectionPage extends StatelessWidget {
   const ExerciseSelectionPage({super.key, required this.store, required this.exercises,
-    required this.source, this.bookId, this.printedPage});
+    required this.source, this.bookId, this.printedPage,
+    this.offlineOnly = false, this.sourceImage});
+  final bool offlineOnly;
+  final Uint8List? sourceImage;
   final AppStore store;
   final List<Exercise> exercises;
   final String source;
@@ -625,7 +733,8 @@ class ExerciseSelectionPage extends StatelessWidget {
       ...exercises.map((e) => Padding(padding: const EdgeInsets.only(bottom: 12),
         child: InkWell(onTap: () => Navigator.push(context, MaterialPageRoute(
           builder: (_) => ConfirmExercisePage(store: store, exercise: e,
-            bookId: bookId, printedPage: printedPage, source: source))),
+            bookId: bookId, printedPage: printedPage, source: source,
+            offlineOnly: offlineOnly, sourceImage: sourceImage))),
           child: Surface(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
             children: [Text('Задание ${e.number}', style: const TextStyle(color: accent,
               fontWeight: FontWeight.w800)), const SizedBox(height: 10), Text(e.text,
@@ -636,13 +745,15 @@ class ExerciseSelectionPage extends StatelessWidget {
 class ConfirmExercisePage extends StatefulWidget {
   const ConfirmExercisePage({super.key, required this.store, required this.exercise,
     this.book, this.bookId, this.printedPage, this.source,
-    this.offlineExercise, this.uncertain = false});
+    this.offlineExercise, this.uncertain = false,
+    this.offlineOnly = false, this.sourceImage});
+  final Uint8List? sourceImage;
   final AppStore store;
   final Exercise exercise;
   final BookRecord? book;
   final String? bookId, source;
   final int? printedPage;
-  final bool uncertain;
+  final bool uncertain, offlineOnly;
   final OfflineExercise? offlineExercise;
   @override
   State<ConfirmExercisePage> createState() => _ConfirmExercisePageState();
@@ -728,7 +839,8 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
         ? 'Учебник: ${widget.book!.title}' : 'Карточка'),
       bookId: widget.book?.id ?? widget.bookId,
       page: widget.printedPage,
-      number: widget.exercise.number);
+      number: widget.exercise.number,
+      offlineOnly: widget.offlineOnly);
   }
 
   @override
@@ -738,6 +850,16 @@ class _ConfirmExercisePageState extends State<ConfirmExercisePage> {
       const SectionHead('Всё правильно?',
         subtitle: 'Перед решением проверь, что все числа и знаки точны'),
       const SizedBox(height: 15),
+      if (widget.sourceImage != null) ...[
+        const Text('Оригинал карточки', style: TextStyle(
+          color: ink, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        ClipRRect(borderRadius: BorderRadius.circular(12),
+          child: InteractiveViewer(minScale: 1, maxScale: 5,
+            child: Image.memory(widget.sourceImage!, height: 250,
+              fit: BoxFit.contain))),
+        const SizedBox(height: 14),
+      ],
       if (canShowPrepared) ...[
         const Surface(color: Color(0xffe6f8f1),
           child: Row(children: [
@@ -884,8 +1006,10 @@ class OfflinePageHighlight extends StatelessWidget {
 
 class ProcessingPage extends StatefulWidget {
   const ProcessingPage({super.key, required this.store, required this.text,
-    required this.source, this.bookId, this.page, this.number});
+    required this.source, this.bookId, this.page, this.number,
+    this.offlineOnly = false});
   final AppStore store;
+  final bool offlineOnly;
   final String text, source;
   final String? bookId, number;
   final int? page;
@@ -899,7 +1023,8 @@ class _ProcessingPageState extends State<ProcessingPage> {
   Future<void> process() async {
     try {
       final result = await AiService(widget.store).solve(widget.text, source: widget.source,
-        bookId: widget.bookId, page: widget.page, number: widget.number);
+        bookId: widget.bookId, page: widget.page, number: widget.number,
+        offlineOnly: widget.offlineOnly);
       await widget.store.remember(result);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
@@ -915,8 +1040,10 @@ class _ProcessingPageState extends State<ProcessingPage> {
           const SizedBox(height: 13), const CircularProgressIndicator(),
           const SizedBox(height: 15), const Text('Решаем и проверяем...', style: TextStyle(
             color: ink, fontSize: 19, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 9), const Text('Математический движок · Groq Cloud · Gemini',
-            style: TextStyle(color: muted), textAlign: TextAlign.center),
+          const SizedBox(height: 9), Text(widget.offlineOnly
+              ? 'Только локальный математический движок · без интернета'
+              : 'Математический движок · Groq Cloud · Gemini',
+            style: const TextStyle(color: muted), textAlign: TextAlign.center),
         ] else ...[
           const Icon(Icons.error_outline_rounded, color: Colors.orange, size: 50),
           const SizedBox(height: 9), Text(error!, textAlign: TextAlign.center),
