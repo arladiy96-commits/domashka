@@ -1,0 +1,33 @@
+name: Validate offline math rules
+
+on:
+  pull_request:
+    paths:
+      - 'lib/math_engine.dart'
+      - 'lib/offline_word_rules.dart'
+      - 'lib/ai_service.dart'
+      - 'test/**'
+      - '.github/workflows/offline-rules-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Bootstrap Flutter platform files
+        run: flutter create --org kz.domashka --project-name domashka --platforms android --no-pub .
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Run complete Flutter test suite
+        run: flutter test

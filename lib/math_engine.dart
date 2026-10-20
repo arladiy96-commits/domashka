@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'offline_word_rules.dart';
 
 class MathAnswer {
   const MathAnswer(this.expression, this.value, this.notebook,
@@ -43,7 +44,12 @@ class MathEngine {
     if (found.length != 1 || !RegExp(
       r'^\s*(?:Вычисли[:.]?\s*)?\d{1,5}\s*[+\-−×*÷/:]\s*\d{1,5}\s*(?:=\s*\??|\?)?\s*$',
       caseSensitive: false,
-    ).hasMatch(text.trim())) return null;
+    ).hasMatch(text.trim())) {
+      final word = OfflineWordRules.solve(problem);
+      if (word == null) return null;
+      return MathAnswer(word.expression, word.value, word.notebook,
+          word.explanation, word.rule, word.practice);
+    }
     final a = int.parse(found.single.group(1)!);
     final b = int.parse(found.single.group(3)!);
     final sign = _sign(found.single.group(2)!);

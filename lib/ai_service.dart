@@ -337,6 +337,25 @@ class AiService {
   Future<StudyResult> solve(String problem, {String source = 'Вручную',
       String? bookId, int? page, String? number}) async {
     final engine = MathEngine.solve(problem);
+    // A deterministic result takes precedence over Groq/Gemini even when
+    // API keys are configured. The answer must not be overwritten by AI.
+    if (engine != null) {
+      return StudyResult(
+        id: 'offline-' + DateTime.now().microsecondsSinceEpoch.toString(),
+        problem: problem,
+        answer: engine.value.toString(),
+        notebook: engine.notebook,
+        explanation: engine.explanation,
+        rule: engine.rule,
+        source: source + ' · автономный решатель',
+        createdAt: DateTime.now().toIso8601String(),
+        bookId: bookId,
+        page: page,
+        number: number,
+        verified: true,
+        practice: engine.practice,
+      );
+    }
     String answer = engine?.value.toString() ?? '';
     String notebook = engine?.notebook ?? '';
     String explanation = engine?.explanation ?? '';
