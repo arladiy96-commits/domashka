@@ -1,0 +1,50 @@
+name: Preview offline card OCR
+
+on:
+  pull_request:
+    paths:
+      - 'lib/screens.dart'
+      - 'lib/offline_card_ocr.dart'
+      - 'lib/ai_service.dart'
+      - 'pubspec.yaml'
+      - 'test/**'
+      - 'scripts/fetch_ocr_models.py'
+      - 'assets/tessdata_config.json'
+      - '.github/workflows/ocr-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-ocr-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Bootstrap Android project
+        run: |
+          flutter create --org kz.domashka --project-name domashka --platforms android --no-pub .
+          python3 scripts/configure_android.py
+          rm -f test/widget_test.dart
+      - name: Bundle Russian and English OCR models
+        run: python3 scripts/fetch_ocr_models.py
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Run all tests
+        run: flutter test
+      - name: Build Android debug APK
+        run: flutter build apk --debug
+      - name: Upload private test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: domashka-offline-ocr-preview
+          path: build/app/outputs/flutter-apk/app-debug.apk
