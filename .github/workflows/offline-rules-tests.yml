@@ -25,7 +25,9 @@ jobs:
           cache: true
       - name: Bootstrap Flutter platform files
         run: flutter create --org kz.domashka --project-name domashka --platforms android --no-pub .
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
       - name: Install dependencies
         run: flutter pub get
-      - name: Test offline math rules
-        run: flutter test test/math_engine_test.dart test/offline_ai_priority_test.dart
+      - name: Run complete Flutter test suite
+        run: flutter test
