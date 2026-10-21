@@ -36,7 +36,7 @@ jobs:
       - name: Bootstrap Android project
         run: |
           flutter create --org kz.domashka --project-name domashka --platforms android --no-pub .
-          python3 scripts/configure_android.py
+          DOMASHKA_PREVIEW=1 python3 scripts/configure_android.py
           rm -f test/widget_test.dart
       - name: Bundle Russian and English OCR models
         run: python3 scripts/fetch_ocr_models.py

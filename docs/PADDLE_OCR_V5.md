@@ -25,3 +25,7 @@ lines, recognition time and any undetected diagrams.
 CI unit tests cover polygon reading order and column segmentation. They do NOT
 certify native recognition quality or a perfect answer. Run the preview APK
 on a physical Android ARM64 device to assess actual accuracy.
+
+The preview APK has its own application ID and label ("Домашка OCR тест"),
+so it can be installed alongside the main app without deleting homework history.
+The preview's app data is independent from the main app's data.
