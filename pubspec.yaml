@@ -15,6 +15,10 @@ dependencies:
   file_picker: ^13.1.0
   image_picker: ^1.2.1
   tesseract_ocr: 0.5.0
+  flutter_paddle_ocr_v5:
+    git:
+      url: https://github.com/mencomao/flutter-paddle-ocr.git
+      ref: 3bfac2e79a55950abb2519ad1e9ee637bef74bc1
   path_provider: ^2.1.5
   flutter_secure_storage: ^10.0.0
   flutter_launcher_icons: ^0.14.4
@@ -28,6 +32,7 @@ flutter:
     - assets/images/
     - assets/tessdata_config.json
     - assets/tessdata/
+    - assets/paddle_models/
 flutter_launcher_icons:
   android: true
   ios: false

@@ -5,6 +5,9 @@ on:
     paths:
       - 'lib/screens.dart'
       - 'lib/offline_card_ocr.dart'
+      - 'lib/paddle_card_ocr.dart'
+      - 'lib/ocr_layout.dart'
+      - 'scripts/fetch_paddle_models.py'
       - 'lib/ai_service.dart'
       - 'pubspec.yaml'
       - 'test/**'
@@ -37,6 +40,10 @@ jobs:
           rm -f test/widget_test.dart
       - name: Bundle Russian and English OCR models
         run: python3 scripts/fetch_ocr_models.py
+      - name: Bundle PP-OCRv5 Cyrillic ONNX models
+        run: |
+          python3 -m pip install --user PyYAML
+          python3 scripts/fetch_paddle_models.py
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Patch legacy OCR Gradle repositories
