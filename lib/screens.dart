@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'ai_service.dart';
 import 'offline_card_ocr.dart';
+import 'paddle_card_ocr.dart';
 import 'models.dart';
 import 'store.dart';
 import 'offline_catalog.dart';
@@ -558,7 +559,7 @@ String? extractExercise(String text, String number) {
   return selection.trim().length > 550 ? selection.trim().substring(0, 550) : selection.trim();
 }
 
-enum PhotoReadMode { offline, gemini }
+enum PhotoReadMode { paddle, tesseract, gemini }
 
 class ReadingImagePage extends StatefulWidget {
   const ReadingImagePage({super.key, required this.store, required this.image});
@@ -569,11 +570,12 @@ class ReadingImagePage extends StatefulWidget {
 }
 
 class _ReadingImagePageState extends State<ReadingImagePage> {
-  PhotoReadMode mode = PhotoReadMode.offline;
+  PhotoReadMode mode = PhotoReadMode.paddle;
   bool twoColumns = false;
   bool layoutChosenManually = false;
   bool loading = true;
   String? error;
+  String? ocrWarning;
   List<Exercise> exercises = [];
 
   @override
@@ -584,10 +586,22 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
 
   Future<void> read() async {
     final requested = mode;
-    setState(() { loading = true; error = null; exercises = []; });
+    setState(() { loading = true; error = null; ocrWarning = null; exercises = []; });
     try {
       late final List<Exercise> found;
-      if (requested == PhotoReadMode.offline) {
+      if (requested == PhotoReadMode.paddle) {
+        final layout = await PaddleCardOcr.recognize(widget.image);
+        found = layout.exercises;
+        if (mounted && requested == mode) {
+          setState(() {
+            twoColumns = layout.twoColumns;
+            ocrWarning = layout.lowConfidence
+                ? 'В некоторых строках низкая уверенность OCR. Особенно внимательно проверь цифры и знаки.'
+                : null;
+            exercises = found;
+          });
+        }
+      } else if (requested == PhotoReadMode.tesseract) {
         // Skip the slow full-page OCR when user has explicitly chosen
         // two columns. Only detect layout automatically when necessary.
         if (layoutChosenManually && twoColumns) {
@@ -627,9 +641,9 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => ConfirmExercisePage(
       store: widget.store,
       exercise: const Exercise('карточка', ''),
-      offlineOnly: mode == PhotoReadMode.offline,
+      offlineOnly: mode != PhotoReadMode.gemini,
       uncertain: true,
-      source: mode == PhotoReadMode.offline
+      source: mode != PhotoReadMode.gemini
           ? 'Карточка · ручная проверка офлайн'
           : 'Карточка · ручной ввод',
       sourceImage: widget.image,
@@ -638,7 +652,7 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
 
   @override
   Widget build(BuildContext context) {
-    final isOffline = mode == PhotoReadMode.offline;
+    final isOffline = mode != PhotoReadMode.gemini;
     return Scaffold(
       appBar: AppBar(title: const Text('Фото задания')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
@@ -649,15 +663,17 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
         SegmentedButton<PhotoReadMode>(
           showSelectedIcon: false,
           segments: const [
-            ButtonSegment(value: PhotoReadMode.offline,
-              icon: Icon(Icons.offline_bolt_rounded), label: Text('Офлайн')),
+            ButtonSegment(value: PhotoReadMode.paddle,
+              icon: Icon(Icons.document_scanner_outlined), label: Text('Новый OCR')),
+            ButtonSegment(value: PhotoReadMode.tesseract,
+              icon: Icon(Icons.text_snippet_outlined), label: Text('Старый')),
             ButtonSegment(value: PhotoReadMode.gemini,
               icon: Icon(Icons.cloud_outlined), label: Text('Gemini')),
           ],
           selected: {mode},
           onSelectionChanged: loading ? null : (selected) => choose(selected.first),
         ),
-        if (isOffline) ...[
+        if (mode == PhotoReadMode.tesseract) ...[
           const SizedBox(height: 9),
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
@@ -686,6 +702,11 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
               color: isOffline ? const Color(0xff0b6b56) : ink,
               fontSize: 13, height: 1.4))),
         const SizedBox(height: 18),
+        if (ocrWarning != null) ...[
+          Surface(color: const Color(0xfffff4de),
+            child: Text(ocrWarning!, style: const TextStyle(color: ink))),
+          const SizedBox(height: 12),
+        ],
         if (loading)
           Surface(child: Column(children: [
             const CircularProgressIndicator(),
@@ -727,7 +748,9 @@ class _ReadingImagePageState extends State<ReadingImagePage> {
                   offlineOnly: isOffline, uncertain: isOffline,
                   sourceImage: widget.image,
                   source: isOffline
-                      ? 'Карточка · локальное распознавание'
+                      ? (mode == PhotoReadMode.paddle
+                          ? 'Карточка · PP-OCRv5'
+                          : 'Карточка · Tesseract')
                       : 'Карточка · Gemini',
                 ),
               )),

@@ -1,0 +1,43 @@
+# PP-OCRv5 Cyrillic on-device preview
+
+This branch adds a second independent offline recognizer (the old Tesseract
+remains selectable for an A/B comparison). The app ships the ONNX models,
+so the phone does not download anything and does not upload images to a service.
+
+* Official PP-OCRv5 mobile detection: PaddlePaddle/PP-OCRv5_mobile_det_onnx.
+* Official Cyrillic PP-OCRv5 mobile recognition:
+  PaddlePaddle/cyrillic_PP-OCRv5_mobile_rec_onnx.
+* Inference plugin is pinned to mencomao/flutter-paddle-ocr commit
+  3bfac2e79a55950abb2519ad1e9ee637bef74bc1, Apache-2.0.
+* The build fetches official ONNX assets with SHA-256 validation and extracts
+  the matching recognition dictionary from inference.yml using PyYAML.
+* Supported native architecture: arm64-v8a; phones with other ABIs will not
+  support the ONNX plugin. Retain an untouched v0.1.33 APK for rollback.
+* OCR is not image understanding. Printed tables and diagrams must be checked
+  against the photograph before using a computed answer.
+
+## Benchmarks to run on real school cards
+
+Preview CI generates an optimized ARM64 release-mode APK instead of a huge\nmultiplatform debug build. It still has temporary signing and may not\ninstall as an update over the previous app; keep backup copies of user data.\n\nFor each photo compare PP-OCRv5, Tesseract, and Gemini (when explicitly enabled).
+Record: exact matches of digits, equals/inequality, column boundaries, missing
+lines, recognition time and any undetected diagrams.
+
+CI unit tests cover polygon reading order and column segmentation. They do NOT
+certify native recognition quality or a perfect answer. Run the preview APK
+on a physical Android ARM64 device to assess actual accuracy.
+
+The preview APK has its own application ID and label ("Домашка OCR тест"),
+so it can be installed alongside the main app without deleting homework history.
+The preview's app data is independent from the main app's data.
+
+
+## Android force-close hotfix
+
+An upstream bug in flutter_paddle_ocr_v5 (issue #1) sends Kotlin Unit as the
+MethodChannel result of dispose(). StandardMessageCodec throws on the Android
+main thread and terminates the entire app after photo recognition. The CI script
+scripts/patch_paddle_plugin.py changes the handler to return a serializable null,
+with strict matching and post-patch verification. No cloud fallback is added.
+Native processing now uses two threads, 1440px max detection and a bounded
+2048px intermediate scan to reduce peak RAM on Android phones. Runtime behavior
+still needs physical-device verification; CI cannot replicate native camera OCR.

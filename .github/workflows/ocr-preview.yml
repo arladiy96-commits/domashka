@@ -5,6 +5,10 @@ on:
     paths:
       - 'lib/screens.dart'
       - 'lib/offline_card_ocr.dart'
+      - 'lib/paddle_card_ocr.dart'
+      - 'lib/ocr_layout.dart'
+      - 'scripts/fetch_paddle_models.py'
+      - 'scripts/patch_paddle_plugin.py'
       - 'lib/ai_service.dart'
       - 'pubspec.yaml'
       - 'test/**'
@@ -33,20 +37,26 @@ jobs:
       - name: Bootstrap Android project
         run: |
           flutter create --org kz.domashka --project-name domashka --platforms android --no-pub .
-          python3 scripts/configure_android.py
+          DOMASHKA_PREVIEW=1 python3 scripts/configure_android.py
           rm -f test/widget_test.dart
       - name: Bundle Russian and English OCR models
         run: python3 scripts/fetch_ocr_models.py
+      - name: Bundle PP-OCRv5 Cyrillic ONNX models
+        run: |
+          python3 -m pip install --user PyYAML
+          python3 scripts/fetch_paddle_models.py
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Patch legacy OCR Gradle repositories
         run: python3 scripts/patch_tesseract_gradle.py
+      - name: Patch PaddleOCR fatal Android dispose crash
+        run: python3 scripts/patch_paddle_plugin.py
       - name: Run all tests
         run: flutter test
-      - name: Build Android debug APK
-        run: flutter build apk --debug
+      - name: Build optimized Android ARM64 test APK
+        run: flutter build apk --release --target-platform android-arm64
       - name: Upload private test APK
         uses: actions/upload-artifact@v4
         with:
-          name: domashka-offline-ocr-preview
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: domashka-paddle-ocr-v5-arm64
+          path: build/app/outputs/flutter-apk/app-release.apk

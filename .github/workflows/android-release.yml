@@ -26,16 +26,22 @@ jobs:
           rm -f test/widget_test.dart
       - name: Bundle local Russian-English OCR models
         run: python3 scripts/fetch_ocr_models.py
+      - name: Bundle PP-OCRv5 Cyrillic ONNX models
+        run: |
+          python3 -m pip install --user PyYAML
+          python3 scripts/fetch_paddle_models.py
       - name: Install Flutter dependencies
         run: flutter pub get
       - name: Patch legacy OCR Gradle repositories
         run: python3 scripts/patch_tesseract_gradle.py
+      - name: Patch PaddleOCR fatal Android dispose crash
+        run: python3 scripts/patch_paddle_plugin.py
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
       - name: Run tests
         run: flutter test
       - name: Build release APK
-        run: flutter build apk --release --build-name=0.1.${{ github.run_number }} --build-number=${{ github.run_number }}
+        run: flutter build apk --release --target-platform android-arm64 --build-name=0.1.${{ github.run_number }} --build-number=${{ github.run_number }}
       - name: Prepare artifact
         run: |
           mkdir -p dist
