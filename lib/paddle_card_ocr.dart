@@ -19,12 +19,12 @@ class PaddleCardOcr {
     final source = await _localModels();
     final engine = await PaddleOcr.create(
       source: source,
-      cpuThreadNum: 4,
+      cpuThreadNum: 2,
       useSpaceChar: true,
     );
     try {
       final results = await engine.recognize(scanned.bytes,
-        maxSideLen: 1600, runDetection: true,
+        maxSideLen: 1440, runDetection: true,
         runClassification: false, runRecognition: true);
       final boxes = <CardOcrBox>[];
       for (final item in results) {
@@ -85,5 +85,13 @@ class _ScannedPhoto {
 _ScannedPhoto _scan(Uint8List original) {
   final page = OcrPhotoPreprocessor.decodePage(original);
   // Preserve delicate signs and dots; the ONNX detector handles luminance.
-  return _ScannedPhoto(Uint8List.fromList(img.encodePng(page)), page.width);
+  // Keep intermediate bitmaps bounded: on-phone decoding already holds a
+  // large source photo, and the native ONNX detector allocates more memory.
+  final scaled = page.width > 2048 || page.height > 2048
+      ? img.copyResize(page,
+          width: page.width >= page.height ? 2048 : null,
+          height: page.height > page.width ? 2048 : null,
+          interpolation: img.Interpolation.cubic)
+      : page;
+  return _ScannedPhoto(Uint8List.fromList(img.encodePng(scaled)), scaled.width);
 }

@@ -8,6 +8,7 @@ on:
       - 'lib/paddle_card_ocr.dart'
       - 'lib/ocr_layout.dart'
       - 'scripts/fetch_paddle_models.py'
+      - 'scripts/patch_paddle_plugin.py'
       - 'lib/ai_service.dart'
       - 'pubspec.yaml'
       - 'test/**'
@@ -48,6 +49,8 @@ jobs:
         run: flutter pub get
       - name: Patch legacy OCR Gradle repositories
         run: python3 scripts/patch_tesseract_gradle.py
+      - name: Patch PaddleOCR fatal Android dispose crash
+        run: python3 scripts/patch_paddle_plugin.py
       - name: Run all tests
         run: flutter test
       - name: Build optimized Android ARM64 test APK

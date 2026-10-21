@@ -29,3 +29,15 @@ on a physical Android ARM64 device to assess actual accuracy.
 The preview APK has its own application ID and label ("Домашка OCR тест"),
 so it can be installed alongside the main app without deleting homework history.
 The preview's app data is independent from the main app's data.
+
+
+## Android force-close hotfix
+
+An upstream bug in flutter_paddle_ocr_v5 (issue #1) sends Kotlin Unit as the
+MethodChannel result of dispose(). StandardMessageCodec throws on the Android
+main thread and terminates the entire app after photo recognition. The CI script
+scripts/patch_paddle_plugin.py changes the handler to return a serializable null,
+with strict matching and post-patch verification. No cloud fallback is added.
+Native processing now uses two threads, 1440px max detection and a bounded
+2048px intermediate scan to reduce peak RAM on Android phones. Runtime behavior
+still needs physical-device verification; CI cannot replicate native camera OCR.
