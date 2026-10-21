@@ -15,3 +15,23 @@ if app_gradle.exists():
     if 'abiFilters += "arm64-v8a"' not in gradle and needle in gradle:
         gradle = gradle.replace(needle, needle + '\n        ndk { abiFilters += "arm64-v8a" }', 1)
         app_gradle.write_text(gradle, encoding='utf-8')
+
+# Transitive ONNX and PDF libraries may still package 32-bit/x86 variants.
+# Keep only Android ARM64 to avoid bloated APK and unsupported plugin ABI.
+if app_gradle.exists():
+    gradle = app_gradle.read_text(encoding='utf-8')
+    guard = 'excludes += setOf("lib/armeabi-v7a/**"'
+    if guard not in gradle:
+        insertion = '''
+        packaging {
+            jniLibs {
+                excludes += setOf(
+                    "lib/armeabi-v7a/**",
+                    "lib/x86/**",
+                    "lib/x86_64/**",
+                )
+            }
+        }
+'''
+        gradle = gradle.replace('defaultConfig {', insertion + '\n    defaultConfig {', 1)
+        app_gradle.write_text(gradle, encoding='utf-8')

@@ -18,7 +18,7 @@ so the phone does not download anything and does not upload images to a service.
 
 ## Benchmarks to run on real school cards
 
-For each photo compare PP-OCRv5, Tesseract, and Gemini (when explicitly enabled).
+Preview CI generates an optimized ARM64 release-mode APK instead of a huge\nmultiplatform debug build. It still has temporary signing and may not\ninstall as an update over the previous app; keep backup copies of user data.\n\nFor each photo compare PP-OCRv5, Tesseract, and Gemini (when explicitly enabled).
 Record: exact matches of digits, equals/inequality, column boundaries, missing
 lines, recognition time and any undetected diagrams.
 

@@ -39,7 +39,7 @@ jobs:
       - name: Run tests
         run: flutter test
       - name: Build release APK
-        run: flutter build apk --release --build-name=0.1.${{ github.run_number }} --build-number=${{ github.run_number }}
+        run: flutter build apk --release --target-platform android-arm64 --build-name=0.1.${{ github.run_number }} --build-number=${{ github.run_number }}
       - name: Prepare artifact
         run: |
           mkdir -p dist
